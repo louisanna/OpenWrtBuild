@@ -17,3 +17,40 @@
 #EOF
 #git apply example.patch
 
+echo "===== Auto generate config matching stable release ====="
+cd openwrt
+
+# 1. 获取当前源码分支名（自动识别 openwrt-xx.xx）
+BRANCH_NAME=$(git symbolic-ref --short HEAD)
+echo "Current source branch: $BRANCH_NAME"
+
+# 提取版本号 openwrt-25.12 → 25.12
+RELEASE_VER=$(echo $BRANCH_NAME | sed 's/openwrt-//')
+echo "Matched stable version: $RELEASE_VER"
+
+# 2. 下载同版本官方标准 x86_64 config.buildinfo
+BUILDINFO_URL="https://downloads.openwrt.org/releases/$RELEASE_VER/targets/x86/64/config.buildinfo"
+echo "Download official config: $BUILDINFO_URL"
+wget -q -O .config "$BUILDINFO_URL"
+
+# 清理开发冗余配置，减小固件体积、加速编译
+sed -i '/CONFIG_BUILDBOT=y/d' .config
+sed -i '/CONFIG_SDK=y/d' .config
+sed -i '/CONFIG_IB=y/d' .config
+sed -i '/CONFIG_ALL_KMODS=y/d' .config
+sed -i '/CONFIG_DEVEL=y/d' .config
+sed -i '/CONFIG_TARGET_ALL_PROFILES=y/d' .config
+
+# 3. 追加你需要的软件包
+cat >> .config <<EOF
+
+# 自定义所需软件
+CONFIG_PACKAGE_miniupnpd=y
+CONFIG_PACKAGE_irqbalance=y
+CONFIG_PACKAGE_block-mount=y
+CONFIG_PACKAGE_luci-app-upnp=y
+EOF
+
+echo "===== Config generation finished ====="
+echo "Added custom packages:"
+cat .config | grep -E "miniupnpd|irqbalance|block-mount|luci-app-upnp"
