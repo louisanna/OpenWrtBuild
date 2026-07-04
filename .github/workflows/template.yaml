@@ -13,7 +13,7 @@
 #-------------------------------------------------------------------------------------------------------
 
 # Workflow name which is showed in GitHub Actions.
-name: Build Openwrt for my x86-64 drives
+name: Build Example-Firmware for Example-Device
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ on:
       ssh:
         description: "SSH connection to Actions"
         required: false
-        default: "true"
+        default: "false"
 # Uncomment the following to run regularly. Note that the cron expression here does not contain seconds.
 #  schedule:
 #    - cron: 0 */18 * * *
@@ -64,7 +64,7 @@ env:
   # The following are options of where the firmware needs to be transfered. 
   COWTRANSFER_FIRMWARE: false
   WETRANSFER_FIRMWARE: false
-  RELEASE_FIRMWARE: true
+  RELEASE_FIRMWARE: false
   # Change the following to your time zone.
   TIME_ZONE: Asia/Shanghai
 
@@ -123,7 +123,11 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo rm -rf /etc/apt/sources.list.d/*
-          sudo cp /usr/share/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/
+          sudo tee /etc/apt/sources.list <<EOF
+          deb http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse
+          EOF
           sudo -E apt-get -qq update
           sudo -E apt-get -qq install $BUILD_DEPENDS
           sudo -E apt-get -qq autoremove --purge
@@ -204,7 +208,7 @@ jobs:
         id: organize-files
         run: |
           cd openwrt/bin/targets/*/*
-          rm -rf packages/ swapfile *.swap
+          rm -rf packages/ *.swap swapfile
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
 
@@ -254,6 +258,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           body_path: release.txt
           files: ${{ env.FIRMWARE }}/*
+
 
   clean:
     name: Clean up old assets
