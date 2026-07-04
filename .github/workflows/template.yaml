@@ -43,9 +43,9 @@ env:
   CUSTOM_SCRIPT_2: script2.sh
   STORE_PRODUCTS: false
   STORE_FIRMWARE: true
-  COWTRANSFER_FIRMWARE: false
+  COWTRANSFER_FIRMWARE: true
   WETRANSFER_FIRMWARE: false
-  RELEASE_FIRMWARE: true
+  RELEASE_FIRMWARE: false
   TIME_ZONE: Asia/Shanghai
 
 jobs:
