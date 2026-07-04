@@ -20,15 +20,24 @@
 echo "===== Auto generate config matching stable release ====="
 cd openwrt
 
-# 获取当前源码稳定分支
+# 1. 获取源码分支
 BRANCH_NAME=$(git symbolic-ref --short HEAD)
-RELEASE_VER=$(echo $BRANCH_NAME | sed 's/openwrt-//')
-echo "Current branch: $BRANCH_NAME | Release version: $RELEASE_VER"
+RELEASE_MAJOR=$(echo $BRANCH_NAME | sed 's/openwrt-//')
+echo "Branch: $BRANCH_NAME | Major version: $RELEASE_MAJOR"
 
-# 修正路径 targets/x86/generic 而非 x86/64
-BUILDINFO_URL="https://downloads.openwrt.org/releases/$RELEASE_VER/targets/x86/generic/config.buildinfo"
-echo "Download official config: $BUILDINFO_URL"
-wget -q -O .config "$BUILDINFO_URL"
+# 2. 自动抓取该大版本下最新补丁版本（25.12 → 25.12.4）
+LATEST_PATCH=$(curl -s https://downloads.openwrt.org/releases/ | grep -E "href=\"$RELEASE_MAJOR\.[0-9]+/" | sed -E "s/.*href=\"($RELEASE_MAJOR\.[0-9]+)\/\".*/\1/" | sort -V | tail -n1)
+echo "Latest full release: $LATEST_PATCH"
+
+# 3. 正确完整下载地址
+BUILDINFO_URL="https://downloads.openwrt.org/releases/$LATEST_PATCH/targets/x86/generic/config.buildinfo"
+echo "Download config: $BUILDINFO_URL"
+
+# 4. 下载失败自动降级用 make defconfig
+wget -q -O .config "$BUILDINFO_URL" || {
+  echo "Download failed, fallback to make defconfig"
+  make defconfig
+}
 
 # 清理开发冗余配置，减小固件体积、加速编译
 sed -i '/CONFIG_BUILDBOT=y/d' .config
@@ -38,7 +47,7 @@ sed -i '/CONFIG_ALL_KMODS=y/d' .config
 sed -i '/CONFIG_DEVEL=y/d' .config
 sed -i '/CONFIG_TARGET_ALL_PROFILES=y/d' .config
 
-# 3. 追加你需要的软件包
+# 5. 追加你需要的软件包
 cat >> .config <<EOF
 
 # 自定义所需软件
