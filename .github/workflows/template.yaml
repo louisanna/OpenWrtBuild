@@ -239,7 +239,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           body_path: release.txt
           files: ${{ env.FIRMWARE }}/*
-          overwrite_files: true
+          #overwrite_files: true
 
   clean:
     name: Clean up old assets
