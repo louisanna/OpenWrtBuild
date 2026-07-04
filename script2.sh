@@ -37,7 +37,7 @@ if [ -z "$LATEST_PATCH" ]; then
     make defconfig
 else
     echo "Latest full release: $LATEST_PATCH"
-    BUILDINFO_URL="https://downloads.openwrt.org/releases/$LATEST_PATCH/targets/x86/generic/config.buildinfo"
+    BUILDINFO_URL="https://downloads.openwrt.org/releases/$LATEST_PATCH/targets/x86/64/config.buildinfo"
     echo "Download config: $BUILDINFO_URL"
     wget -q -O .config "$BUILDINFO_URL" || {
         echo "Download failed, fallback to make defconfig"
