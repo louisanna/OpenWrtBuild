@@ -269,7 +269,7 @@ jobs:
 
       - name: Remove old Releases (keep latest 3)
         if: env.RELEASE_FIRMWARE == 'true' && !cancelled()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const repo = context.repo;
@@ -297,5 +297,3 @@ jobs:
               });
               console.log(`Deleted release & tag: ${rel.tag_name}`);
             }
-
-
