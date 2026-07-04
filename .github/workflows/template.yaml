@@ -253,13 +253,13 @@ jobs:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           body_path: release.txt
           files: ${{ env.FIRMWARE }}/*
-
   clean:
     name: Clean up old assets
     runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: write
+      releases: write
 
     steps:
       - name: Delete workflow runs
@@ -269,10 +269,11 @@ jobs:
           keep_minimum_runs: 1
 
       - name: Remove old Releases
-        uses: mattstra/purge-releases-action@v1
+        uses: trstringer/manage-release@v1
         if: env.RELEASE_FIRMWARE == 'true' && !cancelled()
         with:
-          keep_latest: 3
+          mode: delete-old
+          keep_releases: 3
           delete_tags: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
