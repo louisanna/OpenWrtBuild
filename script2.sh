@@ -20,16 +20,13 @@
 echo "===== Auto generate config matching stable release ====="
 cd openwrt
 
-# 1. 获取当前源码分支名（自动识别 openwrt-xx.xx）
+# 获取当前源码稳定分支
 BRANCH_NAME=$(git symbolic-ref --short HEAD)
-echo "Current source branch: $BRANCH_NAME"
-
-# 提取版本号 openwrt-25.12 → 25.12
 RELEASE_VER=$(echo $BRANCH_NAME | sed 's/openwrt-//')
-echo "Matched stable version: $RELEASE_VER"
+echo "Current branch: $BRANCH_NAME | Release version: $RELEASE_VER"
 
-# 2. 下载同版本官方标准 x86_64 config.buildinfo
-BUILDINFO_URL="https://downloads.openwrt.org/releases/$RELEASE_VER/targets/x86/64/config.buildinfo"
+# 修正路径 targets/x86/generic 而非 x86/64
+BUILDINFO_URL="https://downloads.openwrt.org/releases/$RELEASE_VER/targets/x86/generic/config.buildinfo"
 echo "Download official config: $BUILDINFO_URL"
 wget -q -O .config "$BUILDINFO_URL"
 
