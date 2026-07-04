@@ -124,12 +124,18 @@ jobs:
         run: |
           sudo rm -rf /etc/apt/sources.list.d/*
           sudo tee /etc/apt/sources.list <<EOF
-          deb http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse
-          deb http://archive.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse
-          deb http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ noble-security main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ noble-updates main restricted universe multiverse
           EOF
+          BASE_DEPS="binutils bison build-essential bzip2 ccache cmake cpio curl flex gawk git gperf haveged libelf-dev libssl-dev libtool ninja-build p7zip p7zip-full patch pkgconf python3 python3-setuptools qemu-utils rsync squashfs-tools subversion unzip vim wget xxd zlib1g-dev aria2"
+          EXTRA_DEPS="autoconf automake autopoint device-tree-compiler gettext libncurses5-dev libncursesw5-dev libreadline-dev libpython3-dev libfuse-dev libglib2.0-dev libmpc-dev libmpfr-dev libgmp3-dev libltdl-dev intltool help2man mkisofs msmtp lrzsz scons texinfo clang file"
           sudo -E apt-get -qq update
-          sudo -E apt-get -qq install $BUILD_DEPENDS
+          #sudo -E apt-get -qq install $BUILD_DEPENDS
+          sudo apt-get -qq install $BASE_DEPS
+          sudo apt-get -qq install $EXTRA_DEPS
+          # 可选多架构gcc multilib（x86_64编译32位模块用）
+          sudo apt-get -qq install gcc-multilib g++-multilib || true
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           sudo timedatectl set-timezone $TIME_ZONE
