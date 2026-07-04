@@ -19,7 +19,6 @@
 
 set -eo pipefail
 echo "===== Auto generate config matching stable release ====="
-cd openwrt
 
 # 1. 获取源码分支
 BRANCH_NAME=$(git symbolic-ref --short HEAD)
