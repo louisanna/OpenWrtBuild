@@ -269,7 +269,7 @@ jobs:
           keep_minimum_runs: 1
 
       - name: Remove old Releases
-        uses: dev-drprasad/delete-older-releases@master
+        uses: mattstra/purge-releases-action@v1
         if: env.RELEASE_FIRMWARE == 'true' && !cancelled()
         with:
           keep_latest: 3
