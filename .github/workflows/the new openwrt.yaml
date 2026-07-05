@@ -12,7 +12,6 @@
 # copyright information.
 #-------------------------------------------------------------------------------------------------------
 
-# Workflow name which is showed in GitHub Actions.
 name: Build the newest openwrt x86_64 for N5105
 
 on:
@@ -28,10 +27,7 @@ on:
         default: "false"
 
 env:
-  REPO_NAME: openwrt-main-x86_64
   REPO_URL: https://github.com/openwrt/openwrt.git
-  # REPO_BRANCH 将被动态覆盖，此处保留为默认值
-  REPO_BRANCH: openwrt-25.12
   BUILD_DEPENDS:  "ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
                    bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
                    git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev \
@@ -51,30 +47,45 @@ env:
 
 jobs:
   check:
-    name: Check for source code updates
+    name: Check for new stable release
     runs-on: ubuntu-latest
     outputs:
-      cache-hit: ${{ steps.cache-hash.outputs.cache-hit }}
+      cache-hit: ${{ steps.cache.outputs.cache-hit }}
+      stable_tag: ${{ steps.get-version.outputs.stable_tag }}
+      repo_branch: ${{ steps.get-version.outputs.repo_branch }}
 
     steps:
-      - name: Get Commit Hash
-        id: get-hash
+      - name: Get latest stable version
+        id: get-version
         run: |
-          git clone --depth 1 --branch $REPO_BRANCH --single-branch $REPO_URL ./tmp-src
-          echo "commit-hash=$(git -C ./tmp-src rev-parse HEAD)" >> $GITHUB_OUTPUT
-          rm -rf ./tmp-src
+          STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | \
+                            grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | \
+                            cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
+          if [ -z "$STABLE_VERSION" ]; then
+            echo "Error: Failed to get latest stable version"
+            exit 1
+          fi
+          echo "Latest stable version: $STABLE_VERSION"
+          STABLE_TAG="v$STABLE_VERSION"
+          BRANCH_VERSION=$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)
+          REPO_BRANCH="openwrt-$BRANCH_VERSION"
+          echo "stable_tag=$STABLE_TAG" >> $GITHUB_OUTPUT
+          echo "repo_branch=$REPO_BRANCH" >> $GITHUB_OUTPUT
+          echo "STABLE_TAG=$STABLE_TAG" >> $GITHUB_ENV
+          echo "REPO_BRANCH=$REPO_BRANCH" >> $GITHUB_ENV
 
-      - name: Compare Commit Hash
-        id: cache-hash
+      - name: Cache check by tag
+        id: cache
         uses: actions/cache@v4
         with:
-          path: .${{ env.REPO_NAME }}-${{ env.REPO_BRANCH }}-commit-hash
-          key: HEAD-${{ steps.get-hash.outputs.commit-hash }}
+          path: .tag-cache
+          key: TAG-${{ steps.get-version.outputs.stable_tag }}
 
-      - name: Save New Commit Hash
-        if: steps.cache-hash.outputs.cache-hit != 'true'
+      - name: Save new tag (if not cached)
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          echo ${{ steps.get-hash.outputs.commit-hash }} | tee .$REPO_NAME-$REPO_BRANCH-commit-hash
+          mkdir -p .tag-cache
+          echo "${{ steps.get-version.outputs.stable_tag }}" > .tag-cache/tag
 
   build:
     name: Build firmware
@@ -83,6 +94,10 @@ jobs:
     permissions:
       contents: write
     if: needs.check.outputs.cache-hit != 'true' || github.event.inputs.force-build == 'true'
+    env:
+      STABLE_TAG: ${{ needs.check.outputs.stable_tag }}
+      REPO_BRANCH: ${{ needs.check.outputs.repo_branch }}
+      BARK_KEY: ${{ secrets.BARK_KEY }}   # 从 Secrets 读取 Bark Key
 
     steps:
       - name: Checkout
@@ -121,33 +136,6 @@ jobs:
           sudo mkdir -p /workdir/
           sudo chown $USER:$USER /workdir/
 
-      # ---------- 新增：自动获取最新稳定版 Tag ----------
-      - name: Get latest stable tag
-        id: get_version
-        run: |
-          # 获取下载页面并解析最新版本号（例如 25.12.4）
-          STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | \
-                            grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | \
-                            cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
-          if [ -z "$STABLE_VERSION" ]; then
-            echo "Error: Failed to get latest stable version"
-            exit 1
-          fi
-          echo "Latest stable version is: $STABLE_VERSION"
-          
-          # 构造 Tag 名（例如 v25.12.4）和分支名（例如 openwrt-25.12）
-          STABLE_TAG="v$STABLE_VERSION"
-          BRANCH_VERSION=$(echo $STABLE_VERSION | cut -d '.' -f1,2)
-          REPO_BRANCH="openwrt-$BRANCH_VERSION"
-          
-          # 写入环境变量供后续步骤使用
-          echo "STABLE_TAG=$STABLE_TAG" >> $GITHUB_ENV
-          echo "REPO_BRANCH=$REPO_BRANCH" >> $GITHUB_ENV
-          
-          # 同时输出到步骤输出（可选）
-          echo "stable_tag=$STABLE_TAG" >> $GITHUB_OUTPUT
-          echo "repo_branch=$REPO_BRANCH" >> $GITHUB_OUTPUT
-
       - name: Clone source code (using stable tag)
         working-directory: /workdir
         run: |
@@ -168,9 +156,32 @@ jobs:
       - name: Install feeds
         run: cd openwrt/ && ./scripts/feeds install -a
 
+      # ---------- 修复 base-files 版本号 ----------
+      - name: Fix base-files version
+        working-directory: /workdir/openwrt
+        run: |
+          VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
+          echo "Detected version: $VERSION"
+          PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | \
+                        grep -m1 '^Package: base-files' -A 10 | \
+                        grep '^Version:' | \
+                        sed 's/Version: \([0-9]*\)~.*/\1/')
+          if [ -z "$PKG_RELEASE" ]; then
+            echo "Warning: Failed to fetch PKG_RELEASE, using fallback value 1"
+            PKG_RELEASE=1
+          fi
+          echo "Found PKG_RELEASE: $PKG_RELEASE"
+          MAKE_FILE="feeds/base/base-files/Makefile"
+          if [ -f "$MAKE_FILE" ]; then
+            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
+            echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
+          else
+            echo "Error: $MAKE_FILE not found!"
+            exit 1
+          fi
+
       - name: Load custom configuration
         run: |
-          # 修复无files目录直接报错问题
           if [ -d "files" ]; then
             mv files/ openwrt/files/
           fi
@@ -269,6 +280,61 @@ jobs:
           body_path: release.txt
           files: ${{ env.FIRMWARE }}/*
           #overwrite_files: true
+
+      # ---------- 新增：Bark 通知 ----------
+      - name: Send Bark Notification
+        if: always()   # 无论成功或失败都发送
+        run: |
+          # 1. 检查 Bark Key 是否设置，未设置则跳过
+          if [ -z "$BARK_KEY" ]; then
+            echo "BARK_KEY not set, skipping Bark notification."
+            exit 0
+          fi
+
+          # 2. 判断编译状态
+          if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
+            TITLE="✅ OpenWRT 编译完成"
+            BODY="新版本已编译成功。\n"
+            BODY+="版本: $STABLE_TAG\n"
+            BODY+="分支: $REPO_BRANCH\n\n"
+            
+            # 收集下载链接
+            LINK_FOUND=false
+            # Cowtransfer
+            if [ "${{ env.COWTRANSFER_FIRMWARE }}" == "true" ] && [ -n "${{ steps.cowtransfer.outputs.url }}" ]; then
+              BODY+="📦 Cowtransfer: ${{ steps.cowtransfer.outputs.url }}\n"
+              LINK_FOUND=true
+            fi
+            # WeTransfer
+            if [ "${{ env.WETRANSFER_FIRMWARE }}" == "true" ] && [ -n "${{ steps.wetransfer.outputs.url }}" ]; then
+              BODY+="📦 WeTransfer: ${{ steps.wetransfer.outputs.url }}\n"
+              LINK_FOUND=true
+            fi
+            # GitHub Release
+            if [ "${{ env.RELEASE_FIRMWARE }}" == "true" ]; then
+              RELEASE_TAG="${{ steps.tag.outputs.release_tag }}"
+              if [ -n "$RELEASE_TAG" ]; then
+                RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
+                BODY+="📦 Release: $RELEASE_URL\n"
+                LINK_FOUND=true
+              fi
+            fi
+            
+            if [ "$LINK_FOUND" = false ]; then
+              BODY+="⚠️ 未生成任何下载链接，请检查上传配置。\n"
+            fi
+          else
+            TITLE="❌ OpenWRT 编译失败"
+            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n"
+            BODY+="查看日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+
+          # 3. URL 编码消息体（处理换行和特殊字符）
+          ENCODED_BODY=$(echo -e "$BODY" | curl -s -o /dev/null -w %{url_effect} --data-urlencode @- "" | cut -c 3-)
+          
+          # 4. 发送 Bark 请求
+          BARK_URL="https://bark.free.svipss.top/$BARK_KEY/$TITLE/$ENCODED_BODY"
+          curl -X GET "$BARK_URL" || echo "Bark notification failed, but continuing."
 
   clean:
     name: Clean up old assets
