@@ -1,0 +1,302 @@
+#
+# Copyright (c) 2022-2023 Curious <https://www.curious.host>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+# 
+# https://github.com/Curious-r/OpenWrtBuildWorkflows
+# Description: Automatically check OpenWrt source code update and build it. No additional keys are 
+# required.
+#
+# Some features come from https://github.com/P3TERX/Actions-OpenWrt, visit the repository to get its 
+# copyright information.
+#-------------------------------------------------------------------------------------------------------
+
+# Workflow name which is showed in GitHub Actions.
+name: Build the newest openwrt x86_64 for N5105
+
+on:
+  workflow_dispatch:
+    inputs:
+      force-build:
+        description: "Build new firmware anyway"
+        required: false
+        default: "false"
+      ssh:
+        description: "SSH connection to Actions"
+        required: false
+        default: "false"
+
+env:
+  REPO_NAME: openwrt-main-x86_64
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  # REPO_BRANCH 将被动态覆盖，此处保留为默认值
+  REPO_BRANCH: openwrt-25.12
+  BUILD_DEPENDS:  "ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+                   bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
+                   git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev \
+                   libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
+                   libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 \
+                   python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo \
+                   uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev clang file nano aria2"
+  CONFIG_FILE: example.config
+  CUSTOM_SCRIPT_1: script1.sh
+  CUSTOM_SCRIPT_2: script2.sh
+  STORE_PRODUCTS: false
+  STORE_FIRMWARE: true
+  COWTRANSFER_FIRMWARE: true
+  WETRANSFER_FIRMWARE: false
+  RELEASE_FIRMWARE: false
+  TIME_ZONE: Asia/Shanghai
+
+jobs:
+  check:
+    name: Check for source code updates
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.cache-hash.outputs.cache-hit }}
+
+    steps:
+      - name: Get Commit Hash
+        id: get-hash
+        run: |
+          git clone --depth 1 --branch $REPO_BRANCH --single-branch $REPO_URL ./tmp-src
+          echo "commit-hash=$(git -C ./tmp-src rev-parse HEAD)" >> $GITHUB_OUTPUT
+          rm -rf ./tmp-src
+
+      - name: Compare Commit Hash
+        id: cache-hash
+        uses: actions/cache@v4
+        with:
+          path: .${{ env.REPO_NAME }}-${{ env.REPO_BRANCH }}-commit-hash
+          key: HEAD-${{ steps.get-hash.outputs.commit-hash }}
+
+      - name: Save New Commit Hash
+        if: steps.cache-hash.outputs.cache-hit != 'true'
+        run: |
+          echo ${{ steps.get-hash.outputs.commit-hash }} | tee .$REPO_NAME-$REPO_BRANCH-commit-hash
+
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    needs: check
+    permissions:
+      contents: write
+    if: needs.check.outputs.cache-hit != 'true' || github.event.inputs.force-build == 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/*
+          sudo tee /etc/apt/sources.list <<'EOF'
+          deb http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ noble-security main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ noble-updates main restricted universe multiverse
+          EOF
+          sudo apt-get -qq update
+          BASE_DEPS="binutils bison build-essential bzip2 ccache cmake cpio curl flex gawk git gperf haveged libelf-dev libssl-dev libtool ninja-build p7zip p7zip-full patch pkgconf python3 python3-setuptools qemu-utils rsync squashfs-tools subversion unzip vim wget xxd zlib1g-dev aria2"
+          EXTRA_DEPS="autoconf automake autopoint device-tree-compiler gettext libncurses5-dev libncursesw5-dev libreadline-dev libpython3-dev libfuse-dev libglib2.0-dev libmpc-dev libmpfr-dev libgmp3-dev libltdl-dev intltool help2man mkisofs msmtp lrzsz scons texinfo clang file"
+          sudo apt-get -qq install $BASE_DEPS
+          sudo apt-get -qq install $EXTRA_DEPS
+          sudo apt-get -qq install gcc-multilib g++-multilib || true
+          sudo -E apt-get -qq autoremove --purge
+          sudo -E apt-get -qq clean
+          sudo timedatectl set-timezone $TIME_ZONE
+          sudo mkdir -p /workdir/
+          sudo chown $USER:$USER /workdir/
+
+      # ---------- 新增：自动获取最新稳定版 Tag ----------
+      - name: Get latest stable tag
+        id: get_version
+        run: |
+          # 获取下载页面并解析最新版本号（例如 25.12.4）
+          STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | \
+                            grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | \
+                            cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
+          if [ -z "$STABLE_VERSION" ]; then
+            echo "Error: Failed to get latest stable version"
+            exit 1
+          fi
+          echo "Latest stable version is: $STABLE_VERSION"
+          
+          # 构造 Tag 名（例如 v25.12.4）和分支名（例如 openwrt-25.12）
+          STABLE_TAG="v$STABLE_VERSION"
+          BRANCH_VERSION=$(echo $STABLE_VERSION | cut -d '.' -f1,2)
+          REPO_BRANCH="openwrt-$BRANCH_VERSION"
+          
+          # 写入环境变量供后续步骤使用
+          echo "STABLE_TAG=$STABLE_TAG" >> $GITHUB_ENV
+          echo "REPO_BRANCH=$REPO_BRANCH" >> $GITHUB_ENV
+          
+          # 同时输出到步骤输出（可选）
+          echo "stable_tag=$STABLE_TAG" >> $GITHUB_OUTPUT
+          echo "repo_branch=$REPO_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Clone source code (using stable tag)
+        working-directory: /workdir
+        run: |
+          df -hT $PWD
+          echo "Cloning using tag: $STABLE_TAG"
+          git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt/
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
+      - name: Run custom-script-1
+        run: |
+          chmod +x $CUSTOM_SCRIPT_1
+          cd openwrt/
+          $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
+
+      - name: Update feeds
+        run: cd openwrt/ && ./scripts/feeds update -a
+
+      - name: Install feeds
+        run: cd openwrt/ && ./scripts/feeds install -a
+
+      - name: Load custom configuration
+        run: |
+          # 修复无files目录直接报错问题
+          if [ -d "files" ]; then
+            mv files/ openwrt/files/
+          fi
+          #[ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+
+      - name: Run custom-script-2
+        run: |
+          chmod +x $CUSTOM_SCRIPT_2
+          cd openwrt/
+          $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
+
+      - name: SSH connection to Actions
+        uses: P3TERX/ssh2actions@main
+        if: github.event.inputs.ssh == 'true'
+        env:
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+      - name: Download packages
+        id: download-packages
+        run: |
+          cd openwrt/
+          make defconfig
+          make download -j8
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Compile the firmware
+        id: compile
+        run: |
+          cd openwrt/
+          echo -e "$(nproc) thread compile"
+          make -j$(nproc) || make -j1 || make -j1 V=s
+          echo "status=success" >> $GITHUB_OUTPUT
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+      - name: Check space usage
+        if: (!cancelled())
+        run: df -hT
+
+      - name: Upload all compilation products
+        uses: actions/upload-artifact@v4
+        if: steps.compile.outputs.status == 'success' && env.STORE_PRODUCTS == 'true'
+        with:
+          name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: openwrt/bin/
+
+      - name: Organize firmware-related files
+        id: organize-files
+        run: |
+          cd openwrt/bin/targets/*/*
+          rm -rf packages *.swap swapfile *.log
+          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware directory
+        uses: actions/upload-artifact@v4
+        if: steps.organize-files.outputs.status == 'success' && env.STORE_FIRMWARE == 'true' && !cancelled()
+        with:
+          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: ${{ env.FIRMWARE }}
+
+      - name: Upload firmware to cowtransfer
+        id: cowtransfer
+        if: steps.organize-files.outputs.status == 'success' && env.COWTRANSFER_FIRMWARE == 'true' && !cancelled()
+        run: |
+          curl -fsSL git.io/file-transfer | sh
+          ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
+          echo "url=$(cat cowtransfer.log | grep https | awk '{print $NF}')" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware to WeTransfer
+        id: wetransfer
+        if: steps.organize-files.outputs.status == 'success' && env.WETRANSFER_FIRMWARE == 'true' && !cancelled()
+        run: |
+          curl -fsSL git.io/file-transfer | sh
+          ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
+          echo "url=$(cat wetransfer.log | grep https | awk '{print $NF}')" >> $GITHUB_OUTPUT
+
+      - name: Generate release tag
+        id: tag
+        if: env.RELEASE_FIRMWARE == 'true' && !cancelled()
+        run: |
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+          echo "# Build Info" > release.txt
+          echo "- Source: $REPO_URL tag:$STABLE_TAG" >> release.txt
+          [ $COWTRANSFER_FIRMWARE = true ] && echo "- Cowtransfer: ${{ steps.cowtransfer.outputs.url }}" >> release.txt
+          [ $WETRANSFER_FIRMWARE = true ] && echo "- WeTransfer: ${{ steps.wetransfer.outputs.url }}" >> release.txt
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware to release
+        uses: softprops/action-gh-release@v1
+        if: steps.tag.outputs.status == 'success' && !cancelled()
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
+          files: ${{ env.FIRMWARE }}/*
+          #overwrite_files: true
+
+  clean:
+    name: Clean up old assets
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@main
+        with:
+          retain_days: 1
+          keep_minimum_runs: 1
+
+      - name: Remove old Releases (keep latest 3)
+        if: env.RELEASE_FIRMWARE == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const repo = context.repo;
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: repo.owner, repo: repo.repo, per_page: 100
+            });
+            const valid = releases.filter(r => !r.draft && !r.prerelease)
+              .sort((a,b) => new Date(b.published_at) - new Date(a.published_at));
+            const delList = valid.slice(3);
+            for (const r of delList) {
+              await github.rest.repos.deleteRelease({owner:repo.owner,repo:repo.repo,release_id:r.id});
+              await github.rest.git.deleteRef({owner:repo.owner,repo:repo.repo,ref:`tags/${r.tag_name}`});
+              console.log(`Removed: ${r.tag_name}`);
+            }
