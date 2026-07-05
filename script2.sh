@@ -20,10 +20,21 @@
 set -eo pipefail
 echo "===== Auto generate config matching stable release ====="
 
-# 1. 获取源码分支
-BRANCH_NAME=$(git symbolic-ref --short HEAD)
-RELEASE_MAJOR=$(echo "$BRANCH_NAME" | sed 's/openwrt-//')
-echo "Branch: $BRANCH_NAME | Major version: $RELEASE_MAJOR"
+# 1. 获取主版本号（优先使用环境变量 STABLE_TAG）
+if [ -n "$STABLE_TAG" ]; then
+    # STABLE_TAG 格式如 v25.12.5
+    RELEASE_MAJOR=$(echo "$STABLE_TAG" | sed 's/^v//' | cut -d '.' -f1,2)
+    echo "Using STABLE_TAG: $STABLE_TAG, major version: $RELEASE_MAJOR"
+else
+    # 兼容性回退：尝试从 git 分支获取（若仍然在分支上）
+    BRANCH_NAME=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+    if [ -z "$BRANCH_NAME" ]; then
+        echo "Error: Cannot determine version, STABLE_TAG not set and HEAD is detached."
+        exit 1
+    fi
+    RELEASE_MAJOR=$(echo "$BRANCH_NAME" | sed 's/openwrt-//')
+    echo "Branch: $BRANCH_NAME | Major version: $RELEASE_MAJOR"
+fi
 
 # 2. 抓取该大版本下全部补丁版本，过滤空值
 LATEST_PATCH=$(curl -s https://downloads.openwrt.org/releases/ \
@@ -31,7 +42,7 @@ LATEST_PATCH=$(curl -s https://downloads.openwrt.org/releases/ \
     | sed -E "s/.*href=\"($RELEASE_MAJOR\.[0-9]+)\/\".*/\1/" \
     | sort -V | tail -n1 || true)
 
-# 兜底：抓取失败直接走defconfig，不继续下载
+# 兜底：抓取失败直接走 defconfig，不继续下载
 if [ -z "$LATEST_PATCH" ]; then
     echo "Failed to fetch patch version, use default make defconfig"
     make defconfig
@@ -66,4 +77,3 @@ EOF
 
 echo "===== Config generate finished ====="
 grep -E "miniupnpd|irqbalance|block-mount|luci-app-upnp" .config
-
