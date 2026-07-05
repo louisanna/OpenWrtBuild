@@ -73,6 +73,8 @@ CONFIG_PACKAGE_miniupnpd=y
 CONFIG_PACKAGE_irqbalance=y
 CONFIG_PACKAGE_block-mount=y
 CONFIG_PACKAGE_luci-app-upnp=y
+CONFIG_PACKAGE_luci-app-irqbalance=y
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
 EOF
 
 echo "===== Config generate finished ====="
