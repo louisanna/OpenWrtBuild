@@ -161,52 +161,25 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
-          echo "Detected OpenWrt version: $VERSION"
-
-          # 1. 从官方 Packages 文件中提取正确的 PKG_RELEASE
-          echo "Fetching PKG_RELEASE from official packages..."
+          echo "Detected version: $VERSION"
+          # 从官方 Packages 文件中提取 base-files 的 PKG_RELEASE
           PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | \
-                        awk '/^Package: base-files$/{flag=1;next} flag && /^Version:/{print $2;exit}' | \
-                        cut -d'~' -f1)
-
+                        grep -m1 '^Package: base-files' -A 10 | \
+                        grep '^Version:' | \
+                        sed 's/Version: \([0-9]*\)~.*/\1/')
           if [ -z "$PKG_RELEASE" ]; then
-            echo "⚠️ Warning: Failed to fetch PKG_RELEASE, falling back to default 1"
+            echo "Warning: Failed to fetch PKG_RELEASE, using fallback value 1"
             PKG_RELEASE=1
-          else
-            echo "✅ Found PKG_RELEASE: $PKG_RELEASE"
           fi
-
-          # 2. 修改 package/base-files/Makefile（标准源头，不会被 feeds 覆盖）
-          MAKE_FILE="package/base-files/Makefile"
-          if [ ! -f "$MAKE_FILE" ]; then
-            echo "❌ Error: $MAKE_FILE not found!"
+          echo "Found PKG_RELEASE: $PKG_RELEASE"
+          MAKE_FILE="feeds/base/base-files/Makefile"
+          if [ -f "$MAKE_FILE" ]; then
+            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
+            echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
+          else
+            echo "Error: $MAKE_FILE not found!"
             exit 1
           fi
-
-          # 3. 替换或插入 PKG_RELEASE 定义
-          if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
-            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
-          else
-            # 若没有该行，则在 PKG_VERSION 下面插入一行
-            sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
-          fi
-
-          echo "✅ Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
-          # 验证修改结果
-          grep "^PKG_RELEASE:=" "$MAKE_FILE" || echo "⚠️ Warning: PKG_RELEASE not found after update"
-      - name: Load custom configuration
-        run: |
-          if [ -d "files" ]; then
-            mv files/ openwrt/files/
-          fi
-          #[ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-
-      - name: Run custom-script-2
-        run: |
-          chmod +x $CUSTOM_SCRIPT_2
-          cd openwrt/
-          $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
-
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@main
         if: github.event.inputs.ssh == 'true'
