@@ -330,7 +330,7 @@ jobs:
           fi
 
           # 3. URL 编码消息体（处理换行和特殊字符）
-          ENCODED_BODY=$(echo -e "$BODY" | curl -s -o /dev/null -w %{url_effect} --data-urlencode @- "" | cut -c 3-)
+          ENCODED_BODY=$(echo -e "$BODY" | curl -s -G -o /dev/null -w '%{url_effective}' --data-urlencode @- "" | sed 's/^?//')
           
           # 4. 发送 Bark 请求
           BARK_URL="https://bark.free.svipss.top/$BARK_KEY/$TITLE/$ENCODED_BODY"
