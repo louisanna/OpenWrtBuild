@@ -155,7 +155,8 @@ jobs:
 
       - name: Install feeds
         run: cd openwrt/ && ./scripts/feeds install -a
-      # ---------- 修复 base-files 版本号（适配 APK 仓库） ----------
+
+      # ---------- 修复 base-files 版本号（使用 strings 解析 APK 索引） ----------
       - name: Fix base-files version
         working-directory: /workdir/openwrt
         run: |
@@ -165,66 +166,46 @@ jobs:
           MAJOR_VERSION=$(echo "$VERSION" | cut -d '.' -f1,2)
           echo "Detected OpenWrt version: $VERSION (major: $MAJOR_VERSION)"
 
-          # ---- 安装 apk 工具（如果未安装） ----
-          if ! command -v apk &> /dev/null; then
-            echo "Installing apk-tools..."
-            sudo apt-get update -qq
-            sudo apt-get install -y apk-tools
-          fi
-
           PKG_RELEASE=""
 
-          # ---- 定义 APK 仓库索引文件列表（按优先级排序） ----
-          # 格式: "url|repo_name"
-          repos=(
-            "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/packages.adb|target"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/packages.adb|base"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/packages/packages.adb|packages"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/luci/packages.adb|luci"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/routing/packages.adb|routing"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/telephony/packages.adb|telephony"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/video/packages.adb|video"
+          # ---- 定义可能的 packages.adb 文件列表（按优先级排序） ----
+          urls=(
+            "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/packages.adb"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/packages.adb"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/packages/packages.adb"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/luci/packages.adb"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/routing/packages.adb"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/telephony/packages.adb"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/video/packages.adb"
           )
 
-          for entry in "${repos[@]}"; do
-            url="${entry%|*}"
-            name="${entry#*|}"
-            echo "Trying repo: $name ($url)"
+          for url in "${urls[@]}"; do
+            echo "Trying: $url"
+            tmp_file=$(mktemp)
+            curl -s -o "$tmp_file" "$url" || { rm -f "$tmp_file"; continue; }
 
-            # 下载 packages.adb 到临时目录
-            mkdir -p /tmp/apk-repo
-            curl -s -o "/tmp/apk-repo/$name.adb" "$url" || continue
-
-            # 使用 apk 命令从索引中查询 base-files 的版本
-            # 注意：apk 需要指定仓库文件，这里用 -X 指定索引文件路径
-            PKG_INFO=$(apk list -I --repository "/tmp/apk-repo/$name.adb" 2>/dev/null | grep '^base-files-' || true)
+            # 使用 strings 提取可读文本，查找 base-files-<数字>~ 的模式
+            PKG_INFO=$(strings "$tmp_file" | grep -E '^base-files-[0-9]+~' | head -1)
+            rm -f "$tmp_file"
 
             if [ -n "$PKG_INFO" ]; then
-              # 提取版本号，格式如: base-files-1711~f5dae5ece4
-              PKG_RELEASE=$(echo "$PKG_INFO" | sed -n 's/base-files-\([0-9]*\)~.*/\1/p' | head -1)
+              PKG_RELEASE=$(echo "$PKG_INFO" | sed -n 's/base-files-\([0-9]*\)~.*/\1/p')
               if [ -n "$PKG_RELEASE" ]; then
-                echo "✅ Extracted PKG_RELEASE=$PKG_RELEASE from $name repo"
+                echo "✅ Extracted PKG_RELEASE=$PKG_RELEASE from $url"
                 break
               fi
             fi
-
-            # 清理临时文件
-            rm -f "/tmp/apk-repo/$name.adb"
           done
 
           # ---- 如果所有仓库都失败，报错退出 ----
           if [ -z "$PKG_RELEASE" ]; then
             echo "❌ ERROR: Failed to detect PKG_RELEASE from all APK repositories."
-            echo "   Please check network connectivity or the availability of official OpenWrt repositories."
-            echo "   Tried the following repositories:"
-            for entry in "${repos[@]}"; do
-              echo "     - ${entry%|*}"
+            echo "   Tried URLs:"
+            for url in "${urls[@]}"; do
+              echo "     - $url"
             done
             exit 1
           fi
-
-          # ---- 清理临时目录 ----
-          rm -rf /tmp/apk-repo
 
           # ---- 修改 package/base-files/Makefile ----
           MAKE_FILE="package/base-files/Makefile"
