@@ -156,58 +156,58 @@ jobs:
       - name: Install feeds
         run: cd openwrt/ && ./scripts/feeds install -a
 
-      # ---------- 修复 base-files 版本号（使用 strings 解析 APK 索引） ----------
       - name: Fix base-files version
         working-directory: /workdir/openwrt
         run: |
           set -e
 
           VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
-          MAJOR_VERSION=$(echo "$VERSION" | cut -d '.' -f1,2)
-          echo "Detected OpenWrt version: $VERSION (major: $MAJOR_VERSION)"
+          echo "Detected OpenWrt version: $VERSION"
 
           PKG_RELEASE=""
-
-          # ---- 定义可能的 packages.adb 文件列表（按优先级排序） ----
+          # 优先尝试解析传统的 Packages 文件
           urls=(
-            "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/packages.adb"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/packages.adb"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/packages/packages.adb"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/luci/packages.adb"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/routing/packages.adb"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/telephony/packages.adb"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/video/packages.adb"
+            "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages"
           )
 
           for url in "${urls[@]}"; do
-            echo "Trying: $url"
-            tmp_file=$(mktemp)
-            curl -s -o "$tmp_file" "$url" || { rm -f "$tmp_file"; continue; }
-
-            # 使用 strings 提取可读文本，查找 base-files-<数字>~ 的模式
-            PKG_INFO=$(strings "$tmp_file" | grep -E '^base-files-[0-9]+~' | head -1)
-            rm -f "$tmp_file"
-
-            if [ -n "$PKG_INFO" ]; then
-              PKG_RELEASE=$(echo "$PKG_INFO" | sed -n 's/base-files-\([0-9]*\)~.*/\1/p')
-              if [ -n "$PKG_RELEASE" ]; then
-                echo "✅ Extracted PKG_RELEASE=$PKG_RELEASE from $url"
-                break
-              fi
+            echo "Trying Packages index: $url"
+            PKG_RELEASE=$(curl -s "$url" | grep -A 5 '^Package: base-files' | \
+                           grep '^Version:' | sed -n 's/^Version: \([0-9]*\)~.*/\1/p' | head -1)
+            if [ -n "$PKG_RELEASE" ]; then
+              echo "✅ Extracted PKG_RELEASE=$PKG_RELEASE from $url"
+              break
             fi
           done
 
-          # ---- 如果所有仓库都失败，报错退出 ----
+          # 如果 Packages 文件无效，尝试从目录列表获取
           if [ -z "$PKG_RELEASE" ]; then
-            echo "❌ ERROR: Failed to detect PKG_RELEASE from all APK repositories."
-            echo "   Tried URLs:"
-            for url in "${urls[@]}"; do
-              echo "     - $url"
+            echo "Packages index not available, trying directory listing..."
+            dir_urls=(
+              "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/"
+              "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/"
+            )
+            for durl in "${dir_urls[@]}"; do
+              echo "Trying directory: $durl"
+              pkg_file=$(curl -s "$durl" | grep -o 'base-files-[0-9]\+~[^"]*\.\(ipk\|apk\)' | head -1)
+              if [ -n "$pkg_file" ]; then
+                PKG_RELEASE=$(echo "$pkg_file" | sed -n 's/base-files-\([0-9]*\)~.*/\1/p')
+                if [ -n "$PKG_RELEASE" ]; then
+                  echo "✅ Extracted PKG_RELEASE=$PKG_RELEASE from filename $pkg_file"
+                  break
+                fi
+              fi
             done
+          fi
+
+          # 如果所有方法都失败，报错退出
+          if [ -z "$PKG_RELEASE" ]; then
+            echo "❌ ERROR: Failed to detect PKG_RELEASE."
             exit 1
           fi
 
-          # ---- 修改 package/base-files/Makefile ----
+          # 修改 Makefile
           MAKE_FILE="package/base-files/Makefile"
           if [ ! -f "$MAKE_FILE" ]; then
             echo "❌ Error: $MAKE_FILE not found!"
