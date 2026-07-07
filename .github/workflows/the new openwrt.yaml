@@ -223,6 +223,12 @@ jobs:
           echo "✅ Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
           grep "^PKG_RELEASE:=" "$MAKE_FILE"
           
+      - name: Run custom-script-2
+        run: |
+          chmod +x $CUSTOM_SCRIPT_2
+          cd openwrt/
+          $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
+
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@main
         if: github.event.inputs.ssh == 'true'
@@ -311,7 +317,7 @@ jobs:
           files: ${{ env.FIRMWARE }}/*
           #overwrite_files: true
 
-      # ---------- 新增：Bark 通知 ----------
+      # ---------- Bark 通知修复 ----------
       - name: Send Bark Notification (POST)
         if: always()
         run: |
@@ -320,14 +326,39 @@ jobs:
             exit 0
           fi
 
-          # 判断编译状态（根据您的环境调整）
-          if [ "${{ steps.compile.outputs.status }}" == "success" ] || [ "${{ needs.build.result }}" == "success" ]; then
-            TITLE="OpenWRT 编译完成"
-            BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH"
-            # 如果有下载链接，可以附加到 BODY 中（需从上下文获取）
+          # 修复：只使用 steps.compile.outputs.status
+          if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
+            TITLE="✅ OpenWRT 编译完成"
+            BODY="新版本已编译成功。\n"
+            BODY+="版本: $STABLE_TAG\n"
+            BODY+="分支: $REPO_BRANCH\n\n"
+            
+            # 收集下载链接
+            LINK_FOUND=false
+            if [ "${{ env.COWTRANSFER_FIRMWARE }}" == "true" ] && [ -n "${{ steps.cowtransfer.outputs.url }}" ]; then
+              BODY+="📦 Cowtransfer: ${{ steps.cowtransfer.outputs.url }}\n"
+              LINK_FOUND=true
+            fi
+            if [ "${{ env.WETRANSFER_FIRMWARE }}" == "true" ] && [ -n "${{ steps.wetransfer.outputs.url }}" ]; then
+              BODY+="📦 WeTransfer: ${{ steps.wetransfer.outputs.url }}\n"
+              LINK_FOUND=true
+            fi
+            if [ "${{ env.RELEASE_FIRMWARE }}" == "true" ]; then
+              RELEASE_TAG="${{ steps.tag.outputs.release_tag }}"
+              if [ -n "$RELEASE_TAG" ]; then
+                RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
+                BODY+="📦 Release: $RELEASE_URL\n"
+                LINK_FOUND=true
+              fi
+            fi
+            
+            if [ "$LINK_FOUND" = false ]; then
+              BODY+="⚠️ 未生成下载链接，请检查上传配置。\n"
+            fi
           else
-            TITLE="OpenWRT 编译失败"
-            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n查看日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            TITLE="❌ OpenWRT 编译失败"
+            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n"
+            BODY+="查看日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi
 
           # 使用 POST 请求，JSON 格式
