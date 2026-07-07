@@ -326,13 +326,13 @@ jobs:
             exit 0
           fi
 
-          # 修复：只使用 steps.compile.outputs.status
+          # 判断编译状态（只使用 steps.compile.outputs.status）
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
-            TITLE="✅ OpenWRT 编译完成"
+            TITLE="OpenWRT 编译完成"
             BODY="新版本已编译成功。\n"
             BODY+="版本: $STABLE_TAG\n"
             BODY+="分支: $REPO_BRANCH\n\n"
-            
+
             # 收集下载链接
             LINK_FOUND=false
             if [ "${{ env.COWTRANSFER_FIRMWARE }}" == "true" ] && [ -n "${{ steps.cowtransfer.outputs.url }}" ]; then
@@ -351,20 +351,26 @@ jobs:
                 LINK_FOUND=true
               fi
             fi
-            
+
             if [ "$LINK_FOUND" = false ]; then
-              BODY+="⚠️ 未生成下载链接，请检查上传配置。\n"
+              BODY+="未生成下载链接，请检查上传配置。\n"
+            else
+              BODY+="\n点击链接即可下载固件。"
             fi
           else
-            TITLE="❌ OpenWRT 编译失败"
+            TITLE="OpenWRT 编译失败"
             BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n"
             BODY+="查看日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           fi
 
-          # 使用 POST 请求，JSON 格式
+          # 使用 POST 请求，JSON 格式，包含 group 分组
           curl -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"title\":\"$TITLE\",\"body\":\"$BODY\"}" \
+            -d "{
+              \"title\": \"$TITLE\",
+              \"body\": \"$BODY\",
+              \"group\": \"OpenWRT\"
+            }" \
             || echo "Bark notification failed, but continuing."
 
   clean:
