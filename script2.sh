@@ -79,4 +79,4 @@ CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
 EOF
 
 echo "===== Config generate finished ====="
-grep -E "miniupnpd|irqbalance|block-mount|luci-app-upnp" .config
+grep -E "curl|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance|luci-i18n-base-zh-cn" .config
