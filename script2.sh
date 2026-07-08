@@ -69,6 +69,7 @@ sed -i '/CONFIG_TARGET_MULTI_PROFILE=y/d' .config
 cat >> .config <<EOF
 
 # 自定义所需软件
+CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_curl=y
 CONFIG_PACKAGE_miniupnpd=y
 CONFIG_PACKAGE_irqbalance=y
