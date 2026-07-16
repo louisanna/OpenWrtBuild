@@ -71,6 +71,7 @@ cat >> .config <<EOF
 # 自定义所需软件
 CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_ethtool=y
 CONFIG_PACKAGE_miniupnpd=y
 CONFIG_PACKAGE_irqbalance=y
 CONFIG_PACKAGE_block-mount=y
@@ -80,4 +81,4 @@ CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
 EOF
 
 echo "===== Config generate finished ====="
-grep -E "curl|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance|luci-i18n-base-zh-cn" .config
+grep -E "curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance|luci-i18n-base-zh-cn" .config
