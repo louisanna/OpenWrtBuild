@@ -1,0 +1,21 @@
+map fullcone_tcp {
+    type inet_service : ipv4_addr
+    flags dynamic, timeout
+    timeout 1d
+}
+
+map fullcone_udp {
+    type inet_service : ipv4_addr
+    flags dynamic, timeout
+    timeout 1d
+}
+
+chain srcnat_wan {
+    oifname "pppoe-wan" ct state new ip saddr 192.168.12.0/24 meta l4proto tcp add @fullcone_tcp { tcp sport : ip saddr }
+    oifname "pppoe-wan" ct state new ip saddr 192.168.12.0/24 meta l4proto udp add @fullcone_udp { udp sport : ip saddr }
+}
+
+chain dstnat_wan {
+    iifname "pppoe-wan" meta nfproto ipv4 meta l4proto tcp dnat ip to tcp dport map @fullcone_tcp
+    iifname "pppoe-wan" meta nfproto ipv4 meta l4proto udp dnat ip to udp dport map @fullcone_udp
+}

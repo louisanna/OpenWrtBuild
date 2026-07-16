@@ -1,0 +1,12 @@
+#!/bin/sh
+while true; do
+  if ubus -S list "network.interface.wan_6"; then
+    # ubus call network.interface.wan_6 down
+    #logger "waiting wan_6 down..."
+    sleep 1
+  else
+    break
+  fi
+done
+
+kill -s HUP `pidof pppd`

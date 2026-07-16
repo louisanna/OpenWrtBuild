@@ -1,0 +1,5 @@
+#!/bin/sh
+[ "${ACTION}" = "reload" ] || [ "${ACTION}" = "restart" ] && {
+    /etc/init.d/miniupnpd restart
+}
+EOF
