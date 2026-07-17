@@ -1,0 +1,28 @@
+#!/bin/sh
+# 在 mount_root 之前挂载 /dev/sda4 为 overlay
+
+# 检查分区是否存在
+if [ -b /dev/sda4 ]; then
+    # 确保分区已格式化（如 ext4）
+    # 如果未格式化，可以在这里自动格式化（谨慎使用）
+    # mkfs.ext4 /dev/sda4
+
+    # 创建临时挂载点
+    mkdir -p /mnt/overlay_tmp
+
+    # 挂载分区
+    mount -t ext4 /dev/sda4 /mnt/overlay_tmp
+
+    # 如果 overlay 目录为空，从 /rom 复制基础系统（可选）
+    if [ ! -d /mnt/overlay_tmp/upper ]; then
+        # 创建 overlay 所需目录结构
+        mkdir -p /mnt/overlay_tmp/upper /mnt/overlay_tmp/work
+    fi
+
+    # 将分区挂载为 overlay（替代原来的 /overlay）
+    mount -t overlay overlay -o lowerdir=/rom,upperdir=/mnt/overlay_tmp/upper,workdir=/mnt/overlay_tmp/work /overlay
+
+    # 如果需要在系统启动后继续访问该分区，可保留 /mnt/overlay_tmp 挂载
+    # 否则可以卸载，但需要确保 overlay 已挂载
+    # umount /mnt/overlay_tmp
+fi
