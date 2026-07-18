@@ -1,5 +1,0 @@
-#!/bin/ash
-sleep 10
-if [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "wan" ]; then
-    /overlay/update-upnp.sh
-fi
