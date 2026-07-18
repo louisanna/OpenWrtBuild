@@ -156,15 +156,6 @@ jobs:
       - name: Install feeds
         run: cd openwrt/ && ./scripts/feeds install -a
 
-      - name: Load custom configuration
-        run: |
-          if [ -d "files" ]; then
-            echo "Copying custom files to openwrt/files/"
-            mv files/ openwrt/files/
-          else
-            echo "No custom files directory found, skipping."
-          fi
-
       - name: Fix base-files version
         working-directory: /workdir/openwrt
         run: |
