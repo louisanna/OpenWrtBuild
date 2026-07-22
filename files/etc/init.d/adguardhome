@@ -1,0 +1,16 @@
+#!/bin/sh /etc/rc.common
+
+USE_PROCD=1
+START=99
+
+start_service() {
+    # 执行你提供的“重启后”命令
+    /overlay/AdGuardHome/AdGuardHome -s stop
+    rm -rf /tmp/AdGuardHome
+    mkdir -p -m 755 /tmp/AdGuardHome
+    /overlay/AdGuardHome/AdGuardHome -s restart -w /tmp/AdGuardHome -c /overlay/AdGuardHome.yaml
+}
+
+stop_service() {
+    /overlay/AdGuardHome/AdGuardHome -s stop
+}

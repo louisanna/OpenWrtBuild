@@ -1,0 +1,239 @@
+http:
+  pprof:
+    port: 6060
+    enabled: false
+  doh:
+    routes:
+      - GET /dns-query
+      - POST /dns-query
+      - GET /dns-query/{ClientID}
+      - POST /dns-query/{ClientID}
+    insecure_enabled: false
+  address: 192.168.12.1:801
+  session_ttl: 30d
+users:
+  - name: ubuntu
+    password: $2a$10$6qTqvGgjEBuR.HxamgQkneNIV/XmVy1z9THKGF1uBli/QMymIMK/i
+auth_attempts: 5
+block_auth_min: 15
+http_proxy: ""
+language: zh-cn
+theme: auto
+dns:
+  bind_hosts:
+    - 0.0.0.0
+  port: 53
+  anonymize_client_ip: false
+  ratelimit: 0
+  ratelimit_subnet_len_ipv4: 24
+  ratelimit_subnet_len_ipv6: 56
+  ratelimit_whitelist: []
+  refuse_any: true
+  upstream_dns:
+    - '[/miwifi.com/mi.com/xiaomi.net/xiaomi.com/baidu.com/ntp.org/ixigua.com/bilivideo.com/bilibili.com/bilivideo.cn/oray.com/gitv.tv/netease.com/zhuanzfx.com/lenovomm.com/lenovomm.cn/ksyuncdn.com/kuaishou.com/163.com/pinduoduo.com/pddpic.com/pddugc.com/biliapi.com/]https://doh.360.cn/dns-query'
+    - '[/douyinvod.com/bdurl.net/douyincdn.com/douyincdn.com.queniurc.com/snssdk.com/xycdn.com/kuiniuca.com/douyinpic.com/amemv.com/ecombdapi.com/douyinstatic.com/yingt.fun/qiezibenpao.com/ks-live.com/ctydoh.cn/siomxity.net/free-lbv26.idouyinvod.com/vegslb.com/free-lbv13.idouyinvod.com/free-lbv3.idouyinvod.com/byteimg.com/zijieapi.com/xinqiucc.com/bytecdn.com/bytedance.com/siomxity.com/smtcdns.com/ahdohpiechei.com/365dmp.com/miaozhen.com/free-lbv6.idouyinvod.com/cjjd14.com/bytegecko.com/huoshanlive.com/douyinliving.com/bytefcdnrd.com/sealaly.net/qishui.com/baike.com/searchpstatp.com/tt.x.bsgslb.cn/ecombdimg.com/ecombdpage.com/bytednsdoc.com/ksyuncdn.com/]180.184.1.1
+      https://doh.360.cn/dns-query'
+    - '[/apple.com/io.mi.com/icloud.com/apple-dns.cn/icloud.com.cn/]quic://dns.alidns.com:853'
+    - '[/wechat.com/qq.com/qq.com.cn/tencent-cloud.cn/tencent.com/tencent-cloud.net/txlivecdn.com/qpic.cn/weixinbridge.com/wechatpay.cn/tencentcos.cn/]https://doh.pub/dns-query'
+    - https://doh.pub/dns-query
+    - https://doh.360.cn/dns-query
+    - https://dns.alidns.com/dns-query
+    - '#https://doh-pure.onedns.net/dns-query'
+  upstream_dns_file: ""
+  bootstrap_dns:
+    - 112.4.0.55
+    - 221.131.143.69
+    - 2409:8020:2000::88
+    - 2409:8020:2000::8
+  fallback_dns:
+    - '[/wechat.com/qq.com/qq.com.cn/tencent-cloud.cn/tencent.com/tencent-cloud.net/txlivecdn.com/qpic.cn/weixinbridge.com/wechatpay.cn/tencentcos.cn/]119.29.29.29
+      2402:4e00::'
+    - 52.80.66.66
+    - 119.29.29.29
+    - 223.5.5.5
+    - 2400:7fc0:849e:200::8
+    - '2402:4e00::'
+    - 2400:3200::1
+  upstream_mode: parallel
+  fastest_timeout: 1s
+  allowed_clients: []
+  disallowed_clients: []
+  blocked_hosts:
+    - version.bind
+    - id.server
+    - hostname.bind
+  trusted_proxies:
+    - 127.0.0.0/8
+    - ::1/128
+  cache_enabled: true
+  cache_size: 268435456
+  cache_ttl_min: 300
+  cache_ttl_max: 4320
+  cache_optimistic: true
+  cache_optimistic_answer_ttl: 30s
+  cache_optimistic_max_age: 12h
+  bogus_nxdomain: []
+  aaaa_disabled: false
+  enable_dnssec: false
+  edns_client_subnet:
+    custom_ip: ""
+    enabled: false
+    use_custom: false
+  max_goroutines: 300
+  handle_ddr: true
+  ipset: []
+  ipset_file: ""
+  bootstrap_prefer_ipv6: false
+  upstream_timeout: 10s
+  private_networks: []
+  use_private_ptr_resolvers: false
+  local_ptr_upstreams: []
+  use_dns64: false
+  dns64_prefixes: []
+  serve_http3: false
+  use_http3_upstreams: false
+  serve_plain_dns: true
+  hostsfile_enabled: true
+  pending_requests:
+    enabled: true
+tls:
+  enabled: false
+  server_name: ""
+  force_https: false
+  port_https: 443
+  port_dns_over_tls: 853
+  port_dns_over_quic: 853
+  port_dnscrypt: 0
+  dnscrypt_config_file: ""
+  certificate_chain: ""
+  private_key: ""
+  certificate_path: ""
+  private_key_path: ""
+  strict_sni_check: false
+querylog:
+  dir_path: ""
+  ignored:
+    - '*.in-addr.arpa'
+    - '*.ip6.arpa'
+  interval: 3d
+  size_memory: 1000
+  enabled: true
+  ignored_enabled: true
+  file_enabled: false
+statistics:
+  dir_path: ""
+  ignored:
+    - '*.in-addr.arpa'
+    - '*.ip6.arpa'
+  interval: 3d
+  enabled: true
+  ignored_enabled: true
+filters:
+  - enabled: false
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
+    name: AdGuard DNS filter
+    id: 1
+  - enabled: false
+    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
+    name: AdAway Default Blocklist
+    id: 2
+  - enabled: true
+    url: https://cdn.jsdelivr.net/gh/neoFelhz/neohosts@gh-pages/full/hosts
+    name: neohosts
+    id: 1768391740
+  - enabled: true
+    url: https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt
+    name: NoCoin adblock list
+    id: 1769260463
+whitelist_filters: []
+user_rules:
+  - '@@||mi-img.com^'
+  - '#@@||miui.com^'
+  - '#@@||ios.bugly.qq.com^'
+  - '#||broker.mina.mi.com^'
+  - 127.0.0.1 shifen.com
+  - '#||a.shifen.com^'
+  - '#||api.miwifi.com^'
+  - '||openapi.shafa.com^'
+  - '||blog.coderstory.cn^'
+  - '||tangjie.me^'
+  - '||irs03.com^'
+  - '||diagnosis.ad.xiaomi.com^'
+  - '||ocsp.sectigo.com^'
+  - '||rsc.cdn77.org^'
+  - '||fp-proxy.fengkongcloud.com^'
+  - '||risk.dun.mi.com^'
+  - '@@||ark.qq.com^'
+dhcp:
+  enabled: false
+  interface_name: ""
+  local_domain_name: lan
+  dhcpv4:
+    gateway_ip: ""
+    subnet_mask: ""
+    range_start: ""
+    range_end: ""
+    lease_duration: 86400
+    icmp_timeout_msec: 1000
+    options: []
+  dhcpv6:
+    range_start: ""
+    lease_duration: 86400
+    ra_slaac_only: false
+    ra_allow_slaac: false
+filtering:
+  blocking_ipv4: ""
+  blocking_ipv6: ""
+  blocked_services:
+    schedule:
+      time_zone: UTC
+    ids: []
+  protection_disabled_until: null
+  safe_search:
+    enabled: false
+    bing: false
+    duckduckgo: false
+    ecosia: false
+    google: false
+    pixabay: false
+    yandex: false
+    youtube: false
+  blocking_mode: default
+  parental_block_host: family-block.dns.adguard.com
+  safebrowsing_block_host: standard-block.dns.adguard.com
+  rewrites: []
+  safe_fs_patterns:
+    - /rom/overlay/AdGuardHome/userfilters/*
+  safebrowsing_cache_size: 1048576
+  safesearch_cache_size: 1048576
+  parental_cache_size: 1048576
+  cache_time: 30
+  filters_update_interval: 24
+  blocked_response_ttl: 1
+  filtering_enabled: true
+  rewrites_enabled: true
+  parental_enabled: false
+  safebrowsing_enabled: false
+  protection_enabled: true
+clients:
+  runtime_sources:
+    whois: true
+    arp: true
+    rdns: true
+    dhcp: true
+    hosts: true
+  persistent: []
+log:
+  enabled: false
+  file: ""
+  max_backups: 1
+  max_size: 50
+  max_age: 1
+  compress: true
+  local_time: false
+  verbose: false
+os:
+  group: ""
+  user: ""
+  rlimit_nofile: 0
+schema_version: 34

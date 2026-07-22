@@ -1,0 +1,99 @@
+
+config dnsmasq
+	option domainneeded '1'
+	option localise_queries '1'
+	option rebind_protection '0'
+	option local '/lan/'
+	option domain 'lan'
+	option expandhosts '1'
+	option cachesize '0'
+	option authoritative '1'
+	option readethers '1'
+	option leasefile '/tmp/dhcp.leases'
+	option localservice '1'
+	option ednspacket_max '1232'
+	option quietdhcp '1'
+	option nohosts '1'
+
+config dhcp 'lan'
+	option interface 'lan'
+	option start '10'
+	option limit '240'
+	option leasetime '2h'
+	option dhcpv4 'server'
+	option dhcpv6 'server'
+	option ra 'server'
+	list ra_flags 'managed-config'
+	list ra_flags 'other-config'
+	list dhcp_option '6,192.168.12.1'
+
+config dhcp 'wan'
+	option interface 'wan'
+	option ignore '1'
+
+config odhcpd 'odhcpd'
+	option maindhcp '0'
+	option leasefile '/tmp/hosts/odhcpd'
+	option leasetrigger '/usr/sbin/odhcpd-update'
+	option loglevel '4'
+	option piofolder '/tmp/odhcpd-piofolder'
+
+config host
+	option name 'FNNAS'
+	list mac '48:F3:17:15:DF:AB'
+	option ip '192.168.12.12'
+	list tag '飞牛NAS'
+
+config host
+	option name 'Xiaomi-Smart-Door-Viewer-1S'
+	list mac 'DC:ED:83:A9:60:A1'
+	list tag '小米智能猫眼1S'
+
+config host
+	option name 'Xiaomi-Smart-Hub-1'
+	list mac '78:DF:72:5A:4A:9B'
+	list tag '小米中枢网关'
+
+config host
+	option name 'Xiaomi-Smart-Hub-2'
+	list mac 'B8:88:80:13:85:E0'
+	list tag '小米中枢网关2'
+
+config host
+	option name 'Xiaomi-Air-Purifier-5S'
+	list mac 'D4:F0:EA:0A:7E:C1'
+	list tag '小米空气净化器5S'
+
+config host
+	option name 'Xiaomi-Air-Purifier-4Pro'
+	list mac '8C:D0:B2:D0:57:37'
+	list tag '小米空气净化器4pro'
+
+config host
+	option name 'Xiaomi-Smart-Socket'
+	list mac '64:09:80:21:FA:30'
+	list tag '小米智能插座'
+
+config host
+	option name 'Mi-Home-Desk-Lamp'
+	list mac 'F0:B4:29:AD:68:79'
+
+config host
+	option name 'Xiaomi-Smart-Door-Lock2-Finger-Vein-Edition'
+	list mac '80:2D:1A:75:D9:E8'
+	list tag '小米智能门锁2指静脉版'
+
+config host
+	option name 'Midea-Gas-Water-Heater'
+	list mac 'D8:34:1C:D6:96:A3'
+	list tag '美的燃气热水器'
+
+config host
+	option name 'Midea-Disinfection-Cabinet'
+	list mac '44:35:D3:0D:D7:39'
+	list tag '美的消毒柜'
+
+config host
+	option name 'gateway-b19'
+	list mac '54:48:E6:64:80:20'
+
