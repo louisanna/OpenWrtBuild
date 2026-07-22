@@ -127,14 +127,6 @@ jobs:
           git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt/
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-      - name: Clone source code (using stable tag)
-        working-directory: /workdir
-        run: |
-          df -hT $PWD
-          echo "Cloning using tag: $STABLE_TAG"
-          git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt/
-          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-
       - name: Copy custom files into OpenWrt source
         working-directory: /workdir/openwrt
         run: |
