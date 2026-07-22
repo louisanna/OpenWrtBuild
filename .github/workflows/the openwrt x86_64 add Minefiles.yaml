@@ -1,0 +1,408 @@
+#
+# Copyright (c) 2022-2023 Curious <https://www.curious.host>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+# 
+# https://github.com/Curious-r/OpenWrtBuildWorkflows
+# Description: Automatically check OpenWrt source code update and build it. No additional keys are 
+# required.
+#
+# Some features come from https://github.com/P3TERX/Actions-OpenWrt, visit the repository to get its 
+# copyright information.
+#-------------------------------------------------------------------------------------------------------
+
+name: the openwrt x86_64 add Minefiles
+
+on:
+  workflow_dispatch:
+    inputs:
+      force-build:
+        description: "Build new firmware anyway"
+        required: true
+        default: "true"
+
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt.git
+  CUSTOM_SCRIPT_1: script1_turboacc.sh
+  CUSTOM_SCRIPT_2: script2_turboacc.sh
+  STORE_PRODUCTS: false
+  STORE_FIRMWARE: true
+  COWTRANSFER_FIRMWARE: false
+  WETRANSFER_FIRMWARE: false
+  RELEASE_FIRMWARE: false
+  TIME_ZONE: Asia/Shanghai
+
+jobs:
+  check:
+    name: Check for new stable release
+    runs-on: ubuntu-latest
+    outputs:
+      cache-hit: ${{ steps.cache.outputs.cache-hit }}
+      stable_tag: ${{ steps.get-version.outputs.stable_tag }}
+      repo_branch: ${{ steps.get-version.outputs.repo_branch }}
+
+    steps:
+      - name: Get latest stable version
+        id: get-version
+        run: |
+          STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | \
+                            grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | \
+                            cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
+          if [ -z "$STABLE_VERSION" ]; then
+            echo "Error: Failed to get latest stable version"
+            exit 1
+          fi
+          echo "Latest stable version: $STABLE_VERSION"
+          STABLE_TAG="v$STABLE_VERSION"
+          BRANCH_VERSION=$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)
+          REPO_BRANCH="openwrt-$BRANCH_VERSION"
+          echo "stable_tag=$STABLE_TAG" >> $GITHUB_OUTPUT
+          echo "repo_branch=$REPO_BRANCH" >> $GITHUB_OUTPUT
+          echo "STABLE_TAG=$STABLE_TAG" >> $GITHUB_ENV
+          echo "REPO_BRANCH=$REPO_BRANCH" >> $GITHUB_ENV
+
+      - name: Cache check by tag
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: .tag-cache
+          key: TAG-${{ steps.get-version.outputs.stable_tag }}
+
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    needs: check
+    permissions:
+      contents: write
+    if: needs.check.outputs.cache-hit != 'true' || github.event.inputs.force-build == 'true'
+    env:
+      STABLE_TAG: ${{ needs.check.outputs.stable_tag }}
+      REPO_BRANCH: ${{ needs.check.outputs.repo_branch }}
+      BARK_KEY: ${{ secrets.BARK_KEY }}   # 从 Secrets 读取 Bark Key
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/*
+          sudo tee /etc/apt/sources.list <<'EOF'
+          deb http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ noble-security main restricted universe multiverse
+          deb http://archive.ubuntu.com/ubuntu/ noble-updates main restricted universe multiverse
+          EOF
+          sudo apt-get -qq update
+          BASE_DEPS="binutils bison build-essential bzip2 ccache cmake cpio curl flex gawk git gperf haveged libelf-dev libssl-dev libtool ninja-build p7zip p7zip-full patch pkgconf python3 python3-setuptools qemu-utils rsync squashfs-tools subversion unzip vim wget xxd zlib1g-dev aria2"
+          EXTRA_DEPS="autoconf automake autopoint device-tree-compiler gettext libncurses5-dev libncursesw5-dev libreadline-dev libpython3-dev libfuse-dev libglib2.0-dev libmpc-dev libmpfr-dev libgmp3-dev libltdl-dev intltool help2man mkisofs msmtp lrzsz scons texinfo clang file"
+          sudo apt-get -qq install $BASE_DEPS
+          sudo apt-get -qq install $EXTRA_DEPS
+          sudo apt-get -qq install gcc-multilib g++-multilib || true
+          sudo -E apt-get -qq autoremove --purge
+          sudo -E apt-get -qq clean
+          sudo timedatectl set-timezone $TIME_ZONE
+          sudo mkdir -p /workdir/
+          sudo chown $USER:$USER /workdir/
+
+      - name: Clone source code (using stable tag)
+        working-directory: /workdir
+        run: |
+          df -hT $PWD
+          echo "Cloning using tag: $STABLE_TAG"
+          git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt/
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
+      - name: Clone source code (using stable tag)
+        working-directory: /workdir
+        run: |
+          df -hT $PWD
+          echo "Cloning using tag: $STABLE_TAG"
+          git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt/
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+
+      - name: Copy custom files into OpenWrt source
+        working-directory: /workdir/openwrt
+        run: |
+          # 将仓库根目录下的 files/ 完整复制到 OpenWrt 源码根目录
+          cp -r $GITHUB_WORKSPACE/files ./
+          # 确保所有脚本都有执行权限（可选，但建议）
+          chmod +x files/etc/init.d/adguardhome
+          chmod +x files/etc/uci-defaults/99-adguardhome-setup
+          # 如果压缩包放在 files/overlay/ 下，确保它有可读权限即可
+          echo "Custom files copied successfully."
+
+      - name: Integrate turboacc (no SFE)
+        working-directory: /workdir
+        run: |
+          cd openwrt/
+          # 下载并运行集成脚本，--no-sfe 参数表示不包含 Shortcut-FE 加速[reference:3][reference:4]
+          curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+          bash add_turboacc.sh --no-sfe
+
+      - name: Run custom-script-1
+        run: |
+          chmod +x $CUSTOM_SCRIPT_1
+          cd openwrt/
+          $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
+
+      - name: Update feeds
+        run: cd openwrt/ && ./scripts/feeds update -a
+
+      - name: Install feeds
+        run: cd openwrt/ && ./scripts/feeds install -a
+
+      - name: Fix base-files version
+        working-directory: /workdir/openwrt
+        run: |
+          set -e
+
+          VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
+          echo "Detected OpenWrt version: $VERSION"
+
+          PKG_RELEASE=""
+          # 优先尝试解析传统的 Packages 文件
+          urls=(
+            "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages"
+          )
+
+          for url in "${urls[@]}"; do
+            echo "Trying Packages index: $url"
+            PKG_RELEASE=$(curl -s "$url" | grep -A 5 '^Package: base-files' | \
+                           grep '^Version:' | sed -n 's/^Version: \([0-9]*\)~.*/\1/p' | head -1)
+            if [ -n "$PKG_RELEASE" ]; then
+              echo "✅ Extracted PKG_RELEASE=$PKG_RELEASE from $url"
+              break
+            fi
+          done
+
+          # 如果 Packages 文件无效，尝试从目录列表获取
+          if [ -z "$PKG_RELEASE" ]; then
+            echo "Packages index not available, trying directory listing..."
+            dir_urls=(
+              "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/"
+              "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/"
+            )
+            for durl in "${dir_urls[@]}"; do
+              echo "Trying directory: $durl"
+              pkg_file=$(curl -s "$durl" | grep -o 'base-files-[0-9]\+~[^"]*\.\(ipk\|apk\)' | head -1)
+              if [ -n "$pkg_file" ]; then
+                PKG_RELEASE=$(echo "$pkg_file" | sed -n 's/base-files-\([0-9]*\)~.*/\1/p')
+                if [ -n "$PKG_RELEASE" ]; then
+                  echo "✅ Extracted PKG_RELEASE=$PKG_RELEASE from filename $pkg_file"
+                  break
+                fi
+              fi
+            done
+          fi
+
+          # 如果所有方法都失败，报错退出
+          if [ -z "$PKG_RELEASE" ]; then
+            echo "❌ ERROR: Failed to detect PKG_RELEASE."
+            exit 1
+          fi
+
+          # 修改 Makefile
+          MAKE_FILE="package/base-files/Makefile"
+          if [ ! -f "$MAKE_FILE" ]; then
+            echo "❌ Error: $MAKE_FILE not found!"
+            exit 1
+          fi
+
+          if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
+            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
+          else
+            sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
+          fi
+
+          echo "✅ Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
+          grep "^PKG_RELEASE:=" "$MAKE_FILE"
+          
+      - name: Run custom-script-2
+        run: |
+          chmod +x $CUSTOM_SCRIPT_2
+          cd openwrt/
+          $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
+
+      - name: Download packages
+        id: download-packages
+        run: |
+          cd openwrt/
+          make defconfig
+          make download -j8
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Compile the firmware
+        id: compile
+        run: |
+          cd openwrt/
+          echo -e "$(nproc) thread compile"
+          make -j$(nproc) || make -j1 || make -j1 V=s
+          echo "status=success" >> $GITHUB_OUTPUT
+          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+      - name: Check space usage
+        if: (!cancelled())
+        run: df -hT
+
+      - name: Upload all compilation products
+        uses: actions/upload-artifact@v5
+        if: steps.compile.outputs.status == 'success' && env.STORE_PRODUCTS == 'true'
+        with:
+          name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: openwrt/bin/
+
+      - name: Organize firmware-related files
+        id: organize-files
+        run: |
+          cd openwrt/bin/targets/*/*
+          rm -rf packages *.swap swapfile *.log
+          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware directory
+        uses: actions/upload-artifact@v5
+        if: steps.organize-files.outputs.status == 'success' && env.STORE_FIRMWARE == 'true' && !cancelled()
+        with:
+          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: ${{ env.FIRMWARE }}
+
+      - name: Upload firmware to cowtransfer
+        id: cowtransfer
+        if: steps.organize-files.outputs.status == 'success' && env.COWTRANSFER_FIRMWARE == 'true' && !cancelled()
+        run: |
+          curl -fsSL git.io/file-transfer | sh
+          ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
+          echo "url=$(cat cowtransfer.log | grep https | awk '{print $NF}')" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware to WeTransfer
+        id: wetransfer
+        if: steps.organize-files.outputs.status == 'success' && env.WETRANSFER_FIRMWARE == 'true' && !cancelled()
+        run: |
+          curl -fsSL git.io/file-transfer | sh
+          ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
+          echo "url=$(cat wetransfer.log | grep https | awk '{print $NF}')" >> $GITHUB_OUTPUT
+
+      - name: Generate release tag
+        id: tag
+        if: env.RELEASE_FIRMWARE == 'true' && !cancelled()
+        run: |
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+          echo "# Build Info" > release.txt
+          echo "- Source: $REPO_URL tag:$STABLE_TAG" >> release.txt
+          [ $COWTRANSFER_FIRMWARE = true ] && echo "- Cowtransfer: ${{ steps.cowtransfer.outputs.url }}" >> release.txt
+          [ $WETRANSFER_FIRMWARE = true ] && echo "- WeTransfer: ${{ steps.wetransfer.outputs.url }}" >> release.txt
+          echo "status=success" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware to release
+        uses: softprops/action-gh-release@v2
+        if: steps.tag.outputs.status == 'success' && !cancelled()
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
+          files: ${{ env.FIRMWARE }}/*
+          #overwrite_files: true
+
+      # ---------- Bark 通知修复 ----------
+      - name: Send Bark Notification (POST)
+        if: always()
+        run: |
+          if [ -z "$BARK_KEY" ]; then
+            echo "BARK_KEY not set, skipping Bark notification."
+            exit 0
+          fi
+
+          # 判断编译状态（只使用 steps.compile.outputs.status）
+          if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
+            TITLE="OpenWRT 编译完成"
+            BODY="新版本已编译成功。\n"
+            BODY+="版本: $STABLE_TAG\n"
+            BODY+="分支: $REPO_BRANCH\n\n"
+
+            # 收集下载链接
+            LINK_FOUND=false
+            if [ "${{ env.COWTRANSFER_FIRMWARE }}" == "true" ] && [ -n "${{ steps.cowtransfer.outputs.url }}" ]; then
+              BODY+="📦 Cowtransfer: ${{ steps.cowtransfer.outputs.url }}\n"
+              LINK_FOUND=true
+            fi
+            if [ "${{ env.WETRANSFER_FIRMWARE }}" == "true" ] && [ -n "${{ steps.wetransfer.outputs.url }}" ]; then
+              BODY+="📦 WeTransfer: ${{ steps.wetransfer.outputs.url }}\n"
+              LINK_FOUND=true
+            fi
+            if [ "${{ env.RELEASE_FIRMWARE }}" == "true" ]; then
+              RELEASE_TAG="${{ steps.tag.outputs.release_tag }}"
+              if [ -n "$RELEASE_TAG" ]; then
+                RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
+                BODY+="📦 Release: $RELEASE_URL\n"
+                LINK_FOUND=true
+              fi
+            fi
+
+            if [ "$LINK_FOUND" = false ]; then
+              BODY+="未生成下载链接，请检查上传配置。\n"
+            else
+              BODY+="\n点击链接即可下载固件。"
+            fi
+          else
+            TITLE="OpenWRT 编译失败"
+            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n"
+            BODY+="查看日志: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+
+          # 使用 POST 请求，JSON 格式，包含 group 分组
+          curl -X POST "https://bark.free.svipss.top/$BARK_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"title\": \"$TITLE\",
+              \"body\": \"$BODY\",
+              \"group\": \"OpenWRT\"
+            }" \
+            || echo "Bark notification failed, but continuing."
+
+  clean:
+    name: Clean up old assets
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@main
+        with:
+          retain_days: 1
+          keep_minimum_runs: 1
+
+      - name: Remove old Releases (keep latest 3)
+        if: env.RELEASE_FIRMWARE == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const repo = context.repo;
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: repo.owner, repo: repo.repo, per_page: 100
+            });
+            const valid = releases.filter(r => !r.draft && !r.prerelease)
+              .sort((a,b) => new Date(b.published_at) - new Date(a.published_at));
+            const delList = valid.slice(3);
+            for (const r of delList) {
+              await github.rest.repos.deleteRelease({owner:repo.owner,repo:repo.repo,release_id:r.id});
+              await github.rest.git.deleteRef({owner:repo.owner,repo:repo.repo,ref:`tags/${r.tag_name}`});
+              console.log(`Removed: ${r.tag_name}`);
+            }
