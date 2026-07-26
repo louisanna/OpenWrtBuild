@@ -1,4 +1,4 @@
-name: Build the newest openwrt x86_64 for N5105
+name: The newest openwrt x86_64 for N5105
 
 on:
   workflow_dispatch:
