@@ -144,6 +144,12 @@ jobs:
           git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt/
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
+      - name: Copy custom files into OpenWrt source
+        working-directory: /workdir/openwrt
+        run: |
+          # 将仓库根目录下的 files/ 完整复制到 OpenWrt 源码根目录
+          cp -r $GITHUB_WORKSPACE/files ./
+          
       - name: Run custom-script-1
         run: |
           chmod +x $CUSTOM_SCRIPT_1
