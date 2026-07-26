@@ -1,5 +1,4 @@
 name: The newest openwrt x86_64 for N5105
-
 on:
   workflow_dispatch:
     inputs:
@@ -121,17 +120,27 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
-          PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | grep -A 5 '^Package: base-files' | grep '^Version:' | sed -n 's/^Version: \([0-9]*\)~.*/\1/p' | head -1)
           
-          # 简化的回退机制
-          [ -z "$PKG_RELEASE" ] && PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages" | grep -A 5 '^Package: base-files' | grep '^Version:' | sed -n 's/^Version: \([0-9]*\)~.*/\1/p' | head -1)
-          [ -z "$PKG_RELEASE" ] && echo "❌ ERROR: Failed to detect PKG_RELEASE." && exit 1
+          # 尝试从 base 目录获取完整版本号
+          PKG_VERSION=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages" | grep -A 5 '^Package: base-files$' | grep '^Version:' | head -1 | awk '{print $2}')
           
-          MAKE_FILE="package/base-files/Makefile"
-          if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
-            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
+          # 如果失败，尝试从 targets 目录获取
+          [ -z "$PKG_VERSION" ] && PKG_VERSION=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | grep -A 5 '^Package: base-files$' | grep '^Version:' | head -1 | awk '{print $2}')
+          
+          if [ -n "$PKG_VERSION" ]; then
+            # 提取开头的纯数字部分，无论后面是 ~ 还是 - 都能兼容
+            PKG_RELEASE=$(echo "$PKG_VERSION" | sed -r 's/^([0-9]+).*/\1/')
+            
+            MAKE_FILE="package/base-files/Makefile"
+            if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
+              sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
+            else
+              sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
+            fi
+            echo "Successfully fixed PKG_RELEASE to $PKG_RELEASE"
           else
-            sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
+            # 如果依然失败，不中断编译，发出警告并继续使用源码自带版本
+            echo "Warning: Failed to detect PKG_RELEASE from network. Skipping and using source default."
           fi
 
       - name: Run custom-script-2
