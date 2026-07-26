@@ -1,5 +1,5 @@
 name: The newest openwrt x86_64 for N5105
-n:
+on:
   workflow_dispatch:
     inputs:
       force-build:
