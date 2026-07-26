@@ -1,11 +1,15 @@
 name: The newest openwrt x86_64 for N5105
-on:
+n:
   workflow_dispatch:
     inputs:
       force-build:
         description: "Build new firmware anyway"
-        required: true
-        default: "true"
+        required: false
+        default: "false"
+      ssh:
+        description: "SSH connection to Actions"
+        required: false
+        default: "false"
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
@@ -116,19 +120,16 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
           ./scripts/feeds update -a && ./scripts/feeds install -a
 
-     - name: Fix base-files version
+      - name: Fix base-files version
         working-directory: /workdir/openwrt
         run: |
           VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
           echo "Detected OpenWrt version: $VERSION"
           
-          # 第一步：尝试从 targets 目录获取（使用更兼容的正则，直接截取数字，丢弃对 ~ 的依赖）
+          # 兼容性更强的版本号提取逻辑，不依赖死板的波浪号 ~
           PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | grep -A 5 '^Package: base-files$' | grep '^Version:' | head -1 | sed -r 's/.*Version: ([0-9]+).*/\1/')
-          
-          # 第二步：如果第一步没抓到，尝试从 base 目录获取
           [ -z "$PKG_RELEASE" ] && PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages" | grep -A 5 '^Package: base-files$' | grep '^Version:' | head -1 | sed -r 's/.*Version: ([0-9]+).*/\1/')
           
-          # 第三步：判断是否成功并注入 Makefile
           if [ -n "$PKG_RELEASE" ]; then
             MAKE_FILE="package/base-files/Makefile"
             if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
@@ -138,10 +139,9 @@ jobs:
             fi
             echo "Successfully fixed PKG_RELEASE to $PKG_RELEASE"
           else
-            # 如果依然失败，不再 exit 1 中断编译，而是输出警告并继续
-            echo "WARNING: Failed to detect PKG_RELEASE from network. Skipping and using source default."
+            echo "WARNING: Failed to detect PKG_RELEASE. Skipping and using source default."
           fi
-      
+
       - name: Run custom-script-2
         working-directory: /workdir/openwrt
         run: chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
@@ -150,7 +150,6 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           make defconfig
-          # 强制注入 ccache 配置，并限制缓存大小为 2G
           sed -i 's/# CONFIG_CCACHE is not set/CONFIG_CCACHE=y/g' .config || echo "CONFIG_CCACHE=y" >> .config
           echo "export CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
 
@@ -165,7 +164,6 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           make download -j8
-          # 找出并清理小于 1KB 的错误/空下载文件，防止坏包污染缓存
           find dl -size -1024c -exec rm -f {} \;
 
       - name: Compile the firmware
@@ -235,7 +233,7 @@ jobs:
 
       - name: Remove old Releases
         if: env.RELEASE_FIRMWARE == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const repo = context.repo;
