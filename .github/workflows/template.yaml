@@ -13,7 +13,7 @@
 #-------------------------------------------------------------------------------------------------------
 
 # Workflow name which is showed in GitHub Actions.
-name: Build openwrt x86_64 for 5105
+name: template
 
 on:
   workflow_dispatch:
