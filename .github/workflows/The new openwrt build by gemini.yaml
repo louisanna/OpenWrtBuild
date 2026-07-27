@@ -105,11 +105,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: /workdir/openwrt/.ccache
-          key: openwrt-ccache-${{ env.REPO_BRANCH }}-${{ github.run_id }}
+          key: openwrt-ccache-${{ env.REPO_BRANCH }}-${{ hashFiles('**/config*') }}
           restore-keys: |
             openwrt-ccache-${{ env.REPO_BRANCH }}-
             openwrt-ccache-
-
       - name: Run scripts & Update feeds
         working-directory: /workdir/openwrt
         run: |
@@ -122,7 +121,6 @@ jobs:
           VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
           echo "Detected OpenWrt version: $VERSION"
           
-          # 兼容性更强的版本号提取逻辑，不依赖死板的波浪号 ~
           PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | grep -A 5 '^Package: base-files$' | grep '^Version:' | head -1 | sed -r 's/.*Version: ([0-9]+).*/\1/')
           [ -z "$PKG_RELEASE" ] && PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages" | grep -A 5 '^Package: base-files$' | grep '^Version:' | head -1 | sed -r 's/.*Version: ([0-9]+).*/\1/')
           
