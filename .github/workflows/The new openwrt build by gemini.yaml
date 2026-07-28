@@ -95,7 +95,7 @@ jobs:
       - name: Cache OpenWrt dl directory
         uses: actions/cache@v5
         with:
-          path: /workdir/openwrt/dl
+          path: openwrt/dl
           key: openwrt-dl-${{ env.REPO_BRANCH }}-${{ hashFiles('**/feeds.conf.default') }}
           restore-keys: |
             openwrt-dl-${{ env.REPO_BRANCH }}-
@@ -104,11 +104,12 @@ jobs:
       - name: Cache ccache
         uses: actions/cache@v5
         with:
-          path: /workdir/openwrt/.ccache
+          path: openwrt/.ccache
           key: openwrt-ccache-${{ env.REPO_BRANCH }}-${{ hashFiles('**/config*') }}
           restore-keys: |
             openwrt-ccache-${{ env.REPO_BRANCH }}-
             openwrt-ccache-
+      
       - name: Run scripts & Update feeds
         working-directory: /workdir/openwrt
         run: |
