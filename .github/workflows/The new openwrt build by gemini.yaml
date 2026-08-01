@@ -165,12 +165,16 @@ jobs:
         working-directory: /workdir/openwrt
         id: compile
         run: |
+          set +e
           make -j$(nproc) || make -j1 || make -j1 V=s
-          
-          echo "status=success" >> $GITHUB_OUTPUT
-          grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-          [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
-          echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+          BUILD_STATUS=$?
+          if [ $BUILD_STATUS -eq 0 ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+          mkdir -p .ccache
+          exit $BUILD_STATUS
 
       - name: Organize firmware-related files
         id: organize-files
