@@ -1,0 +1,141 @@
+#!/bin/sh /etc/rc.common
+START=99
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance
+    # 直接在服务中执行内联的守护逻辑
+    procd_set_param command /bin/sh -c '
+# ---------- 初始化 ----------
+while [ ! -f /sys/class/net/eth0/queues/rx-0/rps_cpus ]; do
+    sleep 1
+done
+
+[ -x /etc/init.d/irqbalance ] && {
+    /etc/init.d/irqbalance stop 2>/dev/null
+    /etc/init.d/irqbalance disable 2>/dev/null
+}
+killall irqbalance 2>/dev/null
+
+cores=$(grep -c ^processor /proc/cpuinfo)
+rps_mask_no_cpu0=$(printf "%x" $(( ((1 << cores) - 1) & ~1 )))
+
+# 硬件中断 1:1 绑定
+for iface in eth0 eth1; do
+    cpu=0
+    for irq in $(grep -E "${iface}-TxRx" /proc/interrupts | awk -F: "{print \$1}" | tr -d " "); do
+        printf "%x" $((1 << cpu)) > "/proc/irq/$irq/smp_affinity" 2>/dev/null
+        cpu=$(( (cpu + 1) % cores ))
+    done
+done
+
+q=0
+while [ $q -lt $cores ]; do
+    mask=$(printf "%x" $((1 << q)))
+    [ -f "/sys/class/net/eth1/queues/rx-$q/rps_cpus" ] && echo "$mask" > "/sys/class/net/eth1/queues/rx-$q/rps_cpus"
+    [ -f "/sys/class/net/eth1/queues/tx-$q/xps_cpus" ] && echo "$mask" > "/sys/class/net/eth1/queues/tx-$q/xps_cpus"
+    [ -f "/sys/class/net/eth0/queues/tx-$q/xps_cpus" ] && echo "$mask" > "/sys/class/net/eth0/queues/tx-$q/xps_cpus"
+    [ -f "/sys/class/net/eth0/queues/rx-$q/rps_cpus" ] && echo "$rps_mask_no_cpu0" > "/sys/class/net/eth0/queues/rx-$q/rps_cpus"
+    q=$((q + 1))
+done
+
+if [ -f /sys/class/net/pppoe-wan/queues/rx-0/rps_cpus ]; then
+    echo "$rps_mask_no_cpu0" > /sys/class/net/pppoe-wan/queues/rx-0/rps_cpus
+    echo 4096 > /sys/class/net/pppoe-wan/queues/rx-0/rps_flow_cnt 2>/dev/null
+fi
+
+echo 32768 > /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null
+for q in /sys/class/net/eth1/queues/rx-*; do
+    echo 4096 > "$q/rps_flow_cnt" 2>/dev/null
+done
+
+for iface in eth0 eth1; do
+    ethtool -G $iface rx 1024 tx 1024 2>/dev/null
+    ethtool -C $iface rx-usecs 16 tx-usecs 16 2>/dev/null
+done
+
+# 保存目标值供守护循环使用
+echo "$cores" > /tmp/.irq_guard_cores
+echo "$rps_mask_no_cpu0" > /tmp/.irq_guard_rps_target
+echo "32768" > /tmp/.irq_guard_rfs_global
+echo "4096" > /tmp/.irq_guard_rfs_queue
+
+# 保存每个中断的期望 affinity
+for iface in eth0 eth1; do
+    cpu=0
+    for irq in $(grep -E "${iface}-TxRx" /proc/interrupts | awk -F: "{print \$1}" | tr -d " "); do
+        expected=$(printf "%x" $((1 << cpu)))
+        echo "$irq $expected" >> /tmp/.irq_guard_affinity
+        cpu=$(( (cpu + 1) % cores ))
+    done
+done
+
+logger -t irq_guard "Initialization complete, entering monitor loop"
+
+# ---------- 守护循环 ----------
+while true; do
+    [ -f /tmp/.irq_guard_rps_target ] || { sleep 3; continue; }
+    cores=$(cat /tmp/.irq_guard_cores 2>/dev/null)
+    rps_target=$(cat /tmp/.irq_guard_rps_target)
+    rfs_global=$(cat /tmp/.irq_guard_rfs_global)
+    rfs_queue=$(cat /tmp/.irq_guard_rfs_queue)
+    changed=0
+
+    # 硬件中断 affinity
+    if [ -f /tmp/.irq_guard_affinity ]; then
+        while read irq expected; do
+            cur=$(cat /proc/irq/$irq/smp_affinity 2>/dev/null)
+            if [ -n "$cur" ] && [ "$cur" != "$expected" ]; then
+                echo "$expected" > /proc/irq/$irq/smp_affinity 2>/dev/null && changed=1
+            fi
+        done < /tmp/.irq_guard_affinity
+    fi
+
+    # eth0 RPS/XPS
+    if [ -d /sys/class/net/eth0 ]; then
+        q=0
+        while [ -d "/sys/class/net/eth0/queues/rx-$q" ]; do
+            rps_file="/sys/class/net/eth0/queues/rx-$q/rps_cpus"
+            [ -f "$rps_file" ] && [ "$(cat "$rps_file")" != "$rps_target" ] && echo "$rps_target" > "$rps_file" && changed=1
+            xps_file="/sys/class/net/eth0/queues/tx-$q/xps_cpus"
+            expected_xps=$(printf "%x" $((1 << q)))
+            [ -f "$xps_file" ] && [ "$(cat "$xps_file")" != "$expected_xps" ] && echo "$expected_xps" > "$xps_file" && changed=1
+            q=$((q+1))
+        done
+    fi
+
+    # eth1 RPS/XPS
+    if [ -d /sys/class/net/eth1 ]; then
+        q=0
+        while [ -d "/sys/class/net/eth1/queues/rx-$q" ]; do
+            target_mask=$(printf "%x" $((1 << q)))
+            rps_file="/sys/class/net/eth1/queues/rx-$q/rps_cpus"
+            [ -f "$rps_file" ] && [ "$(cat "$rps_file")" != "$target_mask" ] && echo "$target_mask" > "$rps_file" && changed=1
+            xps_file="/sys/class/net/eth1/queues/tx-$q/xps_cpus"
+            [ -f "$xps_file" ] && [ "$(cat "$xps_file")" != "$target_mask" ] && echo "$target_mask" > "$xps_file" && changed=1
+            q=$((q+1))
+        done
+    fi
+
+    # pppoe-wan RPS + RFS
+    ppp_rps="/sys/class/net/pppoe-wan/queues/rx-0/rps_cpus"
+    if [ -f "$ppp_rps" ]; then
+        [ "$(cat "$ppp_rps")" != "$rps_target" ] && echo "$rps_target" > "$ppp_rps" && changed=1
+        ppp_rfs="/sys/class/net/pppoe-wan/queues/rx-0/rps_flow_cnt"
+        [ -f "$ppp_rfs" ] && [ "$(cat "$ppp_rfs")" != "$rfs_queue" ] && echo "$rfs_queue" > "$ppp_rfs" && changed=1
+    fi
+
+    # eth1 RFS
+    for q in /sys/class/net/eth1/queues/rx-*/rps_flow_cnt; do
+        [ -f "$q" ] && [ "$(cat "$q")" != "$rfs_queue" ] && echo "$rfs_queue" > "$q" && changed=1
+    done
+    cur_global=$(cat /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null)
+    [ -n "$cur_global" ] && [ "$cur_global" != "$rfs_global" ] && echo "$rfs_global" > /proc/sys/net/core/rps_sock_flow_entries && changed=1
+
+    [ $changed -eq 1 ] && logger -t irq_guard "Restored optimized IRQ/RPS/XPS/RFS settings"
+    sleep 3
+done
+'
+    procd_set_param respawn 3600 5 0
+    procd_close_instance
+}
