@@ -1,4 +1,5 @@
 name: The newest openwrt x86_64 for N5105
+
 on:
   workflow_dispatch:
     inputs:
@@ -88,15 +89,15 @@ jobs:
       - name: Clone source code
         working-directory: /workdir
         run: |
-          git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt/
+          git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-          cp -r $GITHUB_WORKSPACE/files $GITHUB_WORKSPACE/openwrt/ || true
+          cp -r $GITHUB_WORKSPACE/files /workdir/openwrt/ || true
 
       - name: Cache OpenWrt dl directory
         uses: actions/cache@v5
         with:
-          path: openwrt/dl
-          key: openwrt-dl-${{ env.REPO_BRANCH }}-${{ hashFiles('**/feeds.conf.default') }}
+          path: /workdir/openwrt/dl
+          key: openwrt-dl-${{ env.REPO_BRANCH }}-${{ hashFiles('**.sh', '**.config') }}
           restore-keys: |
             openwrt-dl-${{ env.REPO_BRANCH }}-
             openwrt-dl-
@@ -104,16 +105,16 @@ jobs:
       - name: Cache ccache
         uses: actions/cache@v5
         with:
-          path: openwrt/.ccache
-          key: openwrt-ccache-${{ env.REPO_BRANCH }}-${{ hashFiles('**/config*') }}
+          path: /workdir/openwrt/.ccache
+          key: openwrt-ccache-${{ env.REPO_BRANCH }}-${{ hashFiles('**.sh', '**.config') }}
           restore-keys: |
             openwrt-ccache-${{ env.REPO_BRANCH }}-
             openwrt-ccache-
-      
+
       - name: Run scripts & Update feeds
         working-directory: /workdir/openwrt
         run: |
-          chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
+          [ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
           ./scripts/feeds update -a && ./scripts/feeds install -a
 
       - name: Fix base-files version
@@ -139,14 +140,22 @@ jobs:
 
       - name: Run custom-script-2
         working-directory: /workdir/openwrt
-        run: chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
+        run: |
+          [ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
 
       - name: Enable ccache & Apply config
         working-directory: /workdir/openwrt
         run: |
-          make defconfig
-          sed -i 's/# CONFIG_CCACHE is not set/CONFIG_CCACHE=y/g' .config || echo "CONFIG_CCACHE=y" >> .config
+          mkdir -p /workdir/openwrt/.ccache
+          echo "CCACHE_DIR=/workdir/openwrt/.ccache" >> $GITHUB_ENV
           echo "export CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
+          
+          [ -f $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
+          
+          make defconfig
+          sed -i 's/# CONFIG_CCACHE is not set/CONFIG_CCACHE=y/g' .config
+          echo "CONFIG_CCACHE=y" >> .config
+          make defconfig
 
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@main
@@ -173,26 +182,26 @@ jobs:
           else
             echo "status=failure" >> $GITHUB_OUTPUT
           fi
-          mkdir -p .ccache
           exit $BUILD_STATUS
 
       - name: Organize firmware-related files
+        working-directory: /workdir/openwrt
         id: organize-files
         if: steps.compile.outputs.status == 'success'
         run: |
-          cd openwrt/bin/targets/*/*
+          cd bin/targets/*/*
           rm -rf packages *.swap swapfile *.log
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
       - name: Upload firmware directory
         uses: actions/upload-artifact@v5
-        if: env.STORE_FIRMWARE == 'true'
+        if: env.STORE_FIRMWARE == 'true' && steps.compile.outputs.status == 'success'
         with:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
 
       - name: Generate release tag & Upload
-        if: env.RELEASE_FIRMWARE == 'true'
+        if: env.RELEASE_FIRMWARE == 'true' && steps.compile.outputs.status == 'success'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.FILE_DATE }}
