@@ -19,14 +19,13 @@ env:
   TIME_ZONE: Asia/Shanghai
 
 jobs:
+  # 仅获取最新稳定版本号，不再做任何缓存检查
   check:
-    name: Check for new stable release
+    name: Get latest stable version
     runs-on: ubuntu-latest
     outputs:
-      cache-hit: ${{ steps.cache.outputs.cache-hit }}
       stable_tag: ${{ steps.get-version.outputs.stable_tag }}
       repo_branch: ${{ steps.get-version.outputs.repo_branch }}
-
     steps:
       - name: Get latest stable version
         id: get-version
@@ -34,26 +33,15 @@ jobs:
           STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
           [ -z "$STABLE_VERSION" ] && echo "Error: Failed to get version" && exit 1
           echo "Latest stable version: $STABLE_VERSION"
-          
           echo "stable_tag=v$STABLE_VERSION" >> $GITHUB_OUTPUT
           echo "repo_branch=openwrt-$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
-
-      - name: Cache check by tag
-        id: cache
-        uses: actions/cache@v5
-        with:
-          path: .tag-cache
-          key: TAG-${{ steps.get-version.outputs.stable_tag }}
-
-      - name: Save new tag
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: mkdir -p .tag-cache && echo "${{ steps.get-version.outputs.stable_tag }}" > .tag-cache/tag
 
   build:
     name: Build firmware
     runs-on: ubuntu-latest
     needs: check
-    if: needs.check.outputs.cache-hit != 'true' || github.event.inputs.force-build == 'true'
+    # 根据 force-build 输入决定是否构建（默认 true）
+    if: github.event.inputs.force-build == 'true'
     permissions:
       contents: write
     env:
@@ -95,24 +83,6 @@ jobs:
           git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
           cp -r $GITHUB_WORKSPACE/files /workdir/openwrt/ || true
-
-      - name: Cache OpenWrt dl directory
-        uses: actions/cache@v5
-        with:
-          path: /workdir/openwrt/dl
-          key: openwrt-dl-${{ env.REPO_BRANCH }}-${{ hashFiles('example.config', 'script1.sh', 'script2.sh') }}
-          restore-keys: |
-            openwrt-dl-${{ env.REPO_BRANCH }}-
-            openwrt-dl-
-
-      - name: Cache ccache
-        uses: actions/cache@v5
-        with:
-          path: /workdir/openwrt/.ccache
-          key: openwrt-ccache-${{ env.REPO_BRANCH }}-${{ hashFiles('example.config', 'script1.sh', 'script2.sh') }}
-          restore-keys: |
-            openwrt-ccache-${{ env.REPO_BRANCH }}-
-            openwrt-ccache-
 
       - name: Run scripts & Update feeds
         working-directory: /workdir/openwrt
@@ -189,20 +159,6 @@ jobs:
             echo "status=failure" >> $GITHUB_OUTPUT
           fi
           
-          # 提取 Ccache 统计数据并存储至环境变量
-          CCACHE_BIN="/workdir/openwrt/staging_dir/host/bin/ccache"
-          if [ -f "$CCACHE_BIN" ]; then
-            STATS=$($CCACHE_BIN -s 2>/dev/null)
-            HIT_RATE=$(echo "$STATS" | grep -i "hit rate" | head -n1 | awk -F':' '{print $2}' | xargs || echo "N/A")
-            CACHE_SIZE=$(echo "$STATS" | grep -i "cache size" | head -n1 | awk -F':' '{print $2}' | xargs || echo "N/A")
-            
-            echo "CCACHE_HIT_RATE=$HIT_RATE" >> $GITHUB_ENV
-            echo "CCACHE_SIZE=$CACHE_SIZE" >> $GITHUB_ENV
-          else
-            echo "CCACHE_HIT_RATE=未启用" >> $GITHUB_ENV
-            echo "CCACHE_SIZE=0 B" >> $GITHUB_ENV
-          fi
-          
           exit $BUILD_STATUS
 
       - name: Organize firmware-related files
@@ -236,7 +192,7 @@ jobs:
         run: |
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
             TITLE="OpenWRT 编译完成"
-            BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH\nCcache命中率: $CCACHE_HIT_RATE\nCcache占用大小: $CCACHE_SIZE"
+            BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH"
           else
             TITLE="OpenWRT 编译失败"
             BODY="编译过程出现问题，请检查 GitHub Actions 日志。\nCcache占用大小: $CCACHE_SIZE"
