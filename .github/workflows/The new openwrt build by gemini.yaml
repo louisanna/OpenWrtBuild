@@ -214,7 +214,7 @@ jobs:
           
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT\"}" || true
+            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
 
   clean:
     name: Clean up old assets
