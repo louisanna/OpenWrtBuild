@@ -110,32 +110,69 @@ jobs:
       - name: Fix base-files version
         working-directory: /workdir/openwrt
         run: |
+          set -e
+
           VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
           echo "Detected OpenWrt version: $VERSION"
-          
-          # 使用 awk 和 cut 提取 Version: 后边、第一个 - 之前的部分
-          PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | \
-                        grep -A 5 '^Package: base-files$' | \
-                        grep '^Version:' | head -n 1 | \
-                        awk '{print $2}' | cut -d'-' -f1)
-          
-          [ -z "$PKG_RELEASE" ] && PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages" | \
-                                                grep -A 5 '^Package: base-files$' | \
-                                                grep '^Version:' | head -n 1 | \
-                                                awk '{print $2}' | cut -d'-' -f1)
-          
-          if [ -n "$PKG_RELEASE" ]; then
-            MAKE_FILE="package/base-files/Makefile"
-            if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
-              sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
-            else
-              sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
+
+          PKG_RELEASE=""
+          # 优先尝试解析传统的 Packages 文件
+          urls=(
+            "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages"
+            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages"
+          )
+
+          for url in "${urls[@]}"; do
+            echo "Trying Packages index: $url"
+            PKG_RELEASE=$(curl -s "$url" | grep -A 5 '^Package: base-files' | \
+                           grep '^Version:' | sed -n 's/^Version: \([0-9]*\)~.*/\1/p' | head -1)
+            if [ -n "$PKG_RELEASE" ]; then
+              echo "Extracted PKG_RELEASE=$PKG_RELEASE from $url"
+              break
             fi
-            touch "$MAKE_FILE"  # 强制刷新
-            echo "✅ Successfully fixed PKG_RELEASE to $PKG_RELEASE"
-          else
-            echo "⚠️ WARNING: Failed to detect PKG_RELEASE. Using source default."
+          done
+
+          # 如果 Packages 文件无效，尝试从目录列表获取
+          if [ -z "$PKG_RELEASE" ]; then
+            echo "Packages index not available, trying directory listing..."
+            dir_urls=(
+              "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/"
+              "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/"
+            )
+            for durl in "${dir_urls[@]}"; do
+              echo "Trying directory: $durl"
+              pkg_file=$(curl -s "$durl" | grep -o 'base-files-[0-9]\+~[^"]*\.\(ipk\|apk\)' | head -1)
+              if [ -n "$pkg_file" ]; then
+                PKG_RELEASE=$(echo "$pkg_file" | sed -n 's/base-files-\([0-9]*\)~.*/\1/p')
+                if [ -n "$PKG_RELEASE" ]; then
+                  echo "Extracted PKG_RELEASE=$PKG_RELEASE from filename $pkg_file"
+                  break
+                fi
+              fi
+            done
           fi
+
+          # 如果所有方法都失败，报错退出
+          if [ -z "$PKG_RELEASE" ]; then
+            echo "ERROR: Failed to detect PKG_RELEASE."
+            exit 1
+          fi
+
+          # 修改 Makefile
+          MAKE_FILE="package/base-files/Makefile"
+          if [ ! -f "$MAKE_FILE" ]; then
+            echo "Error: $MAKE_FILE not found!"
+            exit 1
+          fi
+
+          if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
+            sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
+          else
+            sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
+          fi
+
+          echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
+          grep "^PKG_RELEASE:=" "$MAKE_FILE"
 
       - name: Apply base config
         working-directory: /workdir/openwrt
@@ -207,10 +244,10 @@ jobs:
         if: always() && env.BARK_KEY != ''
         run: |
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
-            TITLE="✅ OpenWRT 编译完成"
+            TITLE="OpenWRT 编译完成"
             BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH"
           else
-            TITLE="❌ OpenWRT 编译失败"
+            TITLE="OpenWRT 编译失败"
             BODY="编译过程出现问题，请检查 GitHub Actions 日志。"
           fi
           
