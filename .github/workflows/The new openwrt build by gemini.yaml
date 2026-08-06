@@ -25,21 +25,40 @@ jobs:
     outputs:
       stable_tag: ${{ steps.get-version.outputs.stable_tag }}
       repo_branch: ${{ steps.get-version.outputs.repo_branch }}
+      new_version: ${{ steps.check-cache.outputs.new_version }}
     steps:
       - name: Get latest stable version
         id: get-version
         run: |
-          STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
+          STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | \
+                            grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | \
+                            cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
           [ -z "$STABLE_VERSION" ] && echo "Error: Failed to get version" && exit 1
           echo "Latest stable version: $STABLE_VERSION"
           echo "stable_tag=v$STABLE_VERSION" >> $GITHUB_OUTPUT
           echo "repo_branch=openwrt-$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
+          echo "stable_version=$STABLE_VERSION" >> $GITHUB_ENV
+
+      - name: Check if new version
+        id: check-cache
+        uses: actions/cache@v5
+        with:
+          path: .version-cache
+          key: version-${{ env.stable_version }}
+
+      - name: Save new version
+        if: steps.check-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .version-cache
+          echo "${{ env.stable_version }}" > .version-cache/version
+          echo "new_version=true" >> $GITHUB_OUTPUT
 
   build:
     name: Build firmware
     runs-on: ubuntu-latest
     needs: check
-    if: github.event.inputs.force-build == 'true'
+    # 仅在新版本或强制构建时执行
+    if: (needs.check.outputs.new_version == 'true') || (github.event.inputs.force-build == 'true')
     permissions:
       contents: write
     env:
@@ -82,7 +101,7 @@ jobs:
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
           cp -r $GITHUB_WORKSPACE/files /workdir/openwrt/ || true
 
-      - name: Run scripts & Update feeds
+      - name: Run custom-script-1 & Update feeds
         working-directory: /workdir/openwrt
         run: |
           [ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
@@ -94,8 +113,16 @@ jobs:
           VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
           echo "Detected OpenWrt version: $VERSION"
           
-          PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | grep -A 5 '^Package: base-files$' | grep '^Version:' | head -1 | sed -r 's/.*Version: ([0-9]+).*/\1/')
-          [ -z "$PKG_RELEASE" ] && PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages" | grep -A 5 '^Package: base-files$' | grep '^Version:' | head -1 | sed -r 's/.*Version: ([0-9]+).*/\1/')
+          # 使用更健壮的正则提取 PKG_RELEASE
+          PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | \
+                        grep -A 5 '^Package: base-files$' | \
+                        grep '^Version:' | head -1 | \
+                        sed -n 's/^Version: \([0-9]*\)~.*/\1/p')
+          
+          [ -z "$PKG_RELEASE" ] && PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages" | \
+                                                  grep -A 5 '^Package: base-files$' | \
+                                                  grep '^Version:' | head -1 | \
+                                                  sed -n 's/^Version: \([0-9]*\)~.*/\1/p')
           
           if [ -n "$PKG_RELEASE" ]; then
             MAKE_FILE="package/base-files/Makefile"
@@ -104,16 +131,24 @@ jobs:
             else
               sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
             fi
-            echo "Successfully fixed PKG_RELEASE to $PKG_RELEASE"
+            touch "$MAKE_FILE"  # 强制刷新
+            echo "✅ Successfully fixed PKG_RELEASE to $PKG_RELEASE"
           else
-            echo "WARNING: Failed to detect PKG_RELEASE. Skipping and using source default."
+            echo "⚠️ WARNING: Failed to detect PKG_RELEASE. Using source default."
           fi
 
-      - name: Apply Base Config & Custom Script 2
+      - name: Apply base config
         working-directory: /workdir/openwrt
         run: |
           [ -f $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
+          make defconfig
+
+      - name: Run custom-script-2 (append custom packages)
+        working-directory: /workdir/openwrt
+        run: |
           [ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
+          # script2.sh 会追加自定义包，并执行 make oldconfig
+          # 注意：script2.sh 内部不应再执行 make defconfig
 
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@main
@@ -140,7 +175,6 @@ jobs:
           else
             echo "status=failure" >> $GITHUB_OUTPUT
           fi
-          
           exit $BUILD_STATUS
 
       - name: Organize firmware-related files
@@ -173,10 +207,10 @@ jobs:
         if: always() && env.BARK_KEY != ''
         run: |
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
-            TITLE="OpenWRT 编译完成"
+            TITLE="✅ OpenWRT 编译完成"
             BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH"
           else
-            TITLE="OpenWRT 编译失败"
+            TITLE="❌ OpenWRT 编译失败"
             BODY="编译过程出现问题，请检查 GitHub Actions 日志。"
           fi
           
@@ -188,6 +222,7 @@ jobs:
     name: Clean up old assets
     runs-on: ubuntu-latest
     needs: build
+    if: always()   # 即使 build 被跳过也运行
     permissions:
       actions: write
       contents: write
