@@ -111,68 +111,39 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           set -e
-
-          VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
+          # 使用 Bash 原生字符串替换替代 echo | sed
+          VERSION=${STABLE_TAG#v}
           echo "Detected OpenWrt version: $VERSION"
 
+          BASE_URL="https://downloads.openwrt.org/releases/$VERSION"
+          PATHS=("targets/x86/64/packages" "packages/x86_64/base")
           PKG_RELEASE=""
-          # 优先尝试解析传统的 Packages 文件
-          urls=(
-            "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages"
-            "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages"
-          )
 
-          for url in "${urls[@]}"; do
-            echo "Trying Packages index: $url"
-            PKG_RELEASE=$(curl -s "$url" | grep -A 5 '^Package: base-files' | \
-                           grep '^Version:' | sed -n 's/^Version: \([0-9]*\)~.*/\1/p' | head -1)
-            if [ -n "$PKG_RELEASE" ]; then
-              echo "Extracted PKG_RELEASE=$PKG_RELEASE from $url"
-              break
-            fi
+          for p in "${PATHS[@]}"; do
+            echo "Trying path: $p"
+            # 1. 优先尝试解析 Packages 文件 (使用 awk 单行搞定)
+            PKG_RELEASE=$(curl -s "$BASE_URL/$p/Packages" | awk '/^Package: base-files/{f=1} f && /^Version:/{print $2; exit}')
+            [ -n "$PKG_RELEASE" ] && echo "Extracted from Packages: $PKG_RELEASE" && break
+            
+            # 2. 如果 Packages 无效，尝试从目录列表获取 (合并 grep 和 sed)
+            PKG_RELEASE=$(curl -s "$BASE_URL/$p/" | grep -m 1 -oE 'base-files-[^"]*\.(ipk|apk)' | sed -E 's/base-files-(.+)\.[^.]+/\1/')
+            [ -n "$PKG_RELEASE" ] && echo "Extracted from directory: $PKG_RELEASE" && break
           done
 
-          # 如果 Packages 文件无效，尝试从目录列表获取
-          if [ -z "$PKG_RELEASE" ]; then
-            echo "Packages index not available, trying directory listing..."
-            dir_urls=(
-              "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/"
-              "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/"
-            )
-            for durl in "${dir_urls[@]}"; do
-              echo "Trying directory: $durl"
-              pkg_file=$(curl -s "$durl" | grep -o 'base-files-[0-9]\+~[^"]*\.\(ipk\|apk\)' | head -1)
-              if [ -n "$pkg_file" ]; then
-                PKG_RELEASE=$(echo "$pkg_file" | sed -n 's/base-files-\([0-9]*\)~.*/\1/p')
-                if [ -n "$PKG_RELEASE" ]; then
-                  echo "Extracted PKG_RELEASE=$PKG_RELEASE from filename $pkg_file"
-                  break
-                fi
-              fi
-            done
-          fi
+          # 错误处理精简为单行
+          [ -z "$PKG_RELEASE" ] && { echo "ERROR: Failed to detect PKG_RELEASE."; exit 1; }
 
-          # 如果所有方法都失败，报错退出
-          if [ -z "$PKG_RELEASE" ]; then
-            echo "ERROR: Failed to detect PKG_RELEASE."
-            exit 1
-          fi
+          MAKE_FILE="package/base-files/Makefile"
+          [ ! -f "$MAKE_FILE" ] && { echo "ERROR: $MAKE_FILE not found!"; exit 1; }
 
           # 修改 Makefile
-          MAKE_FILE="package/base-files/Makefile"
-          if [ ! -f "$MAKE_FILE" ]; then
-            echo "Error: $MAKE_FILE not found!"
-            exit 1
-          fi
-
           if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
             sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
           else
             sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
           fi
-
+          
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
-          grep "^PKG_RELEASE:=" "$MAKE_FILE"
 
       - name: Apply base config
         working-directory: /workdir/openwrt
