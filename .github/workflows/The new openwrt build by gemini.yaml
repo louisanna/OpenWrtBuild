@@ -111,7 +111,6 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           set -e
-          # 使用 Bash 原生字符串替换替代 echo | sed
           VERSION=${STABLE_TAG#v}
           echo "Detected OpenWrt version: $VERSION"
 
@@ -121,16 +120,19 @@ jobs:
 
           for p in "${PATHS[@]}"; do
             echo "Trying path: $p"
-            # 1. 优先尝试解析 Packages 文件 (使用 awk 单行搞定)
+            # 1. 优先尝试解析 Packages 文件
             PKG_RELEASE=$(curl -s "$BASE_URL/$p/Packages" | awk '/^Package: base-files/{f=1} f && /^Version:/{print $2; exit}')
             [ -n "$PKG_RELEASE" ] && echo "Extracted from Packages: $PKG_RELEASE" && break
             
-            # 2. 如果 Packages 无效，尝试从目录列表获取 (合并 grep 和 sed)
-            PKG_RELEASE=$(curl -s "$BASE_URL/$p/" | grep -m 1 -oE 'base-files-[^"]*\.(ipk|apk)' | sed -E 's/base-files-(.+)\.[^.]+/\1/')
+            # 2. 如果 Packages 无效，尝试从目录列表获取 (增加 head -1 防止多次匹配导致的多行问题)
+            PKG_RELEASE=$(curl -s "$BASE_URL/$p/" | grep -oE 'base-files-[^"]*\.(ipk|apk)' | head -1 | sed -E 's/base-files-(.+)\.[^.]+/\1/')
             [ -n "$PKG_RELEASE" ] && echo "Extracted from directory: $PKG_RELEASE" && break
           done
 
-          # 错误处理精简为单行
+          # 安全机制：彻底清除变量中可能包含的回车、换行和多余空格
+          PKG_RELEASE=$(echo "$PKG_RELEASE" | tr -d ' \n\r')
+
+          # 错误处理
           [ -z "$PKG_RELEASE" ] && { echo "ERROR: Failed to detect PKG_RELEASE."; exit 1; }
 
           MAKE_FILE="package/base-files/Makefile"
