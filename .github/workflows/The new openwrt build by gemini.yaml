@@ -122,31 +122,36 @@ jobs:
             echo "Trying path: $p"
             # 1. 优先尝试解析 Packages 文件
             PKG_RELEASE=$(curl -s "$BASE_URL/$p/Packages" | awk '/^Package: base-files/{f=1} f && /^Version:/{print $2; exit}')
-            [ -n "$PKG_RELEASE" ] && echo "Extracted from Packages: $PKG_RELEASE" && break
-            
-            # 2. 加入 head -1，确保只截取第一个匹配项
+            if [ -n "$PKG_RELEASE" ]; then
+              PKG_RELEASE=$(echo "$PKG_RELEASE" | grep -oE '^[0-9]+')
+              [ -n "$PKG_RELEASE" ] && echo "Extracted from Packages: $PKG_RELEASE" && break
+           fi
+
+      # 2. 尝试从目录列表提取
             PKG_RELEASE=$(curl -s "$BASE_URL/$p/" | grep -oE 'base-files-[^"]*\.(ipk|apk)' | head -1 | sed -E 's/base-files-(.+)\.[^.]+/\1/')
-            [ -n "$PKG_RELEASE" ] && echo "Extracted from directory: $PKG_RELEASE" && break
+            if [ -n "$PKG_RELEASE" ]; then
+              PKG_RELEASE=$(echo "$PKG_RELEASE" | grep -oE '^[0-9]+')
+              [ -n "$PKG_RELEASE" ] && echo "Extracted from directory: $PKG_RELEASE" && break
+            fi
           done
 
-          # 3. 终极保险：清除任何可能存在的换行符和空格
+    # 清除多余空白
           PKG_RELEASE=$(echo "$PKG_RELEASE" | tr -d ' \n\r')
 
-          # 错误处理精简为单行
+    # 错误处理
           [ -z "$PKG_RELEASE" ] && { echo "ERROR: Failed to detect PKG_RELEASE."; exit 1; }
 
           MAKE_FILE="package/base-files/Makefile"
           [ ! -f "$MAKE_FILE" ] && { echo "ERROR: $MAKE_FILE not found!"; exit 1; }
 
-          # 修改 Makefile
+    # 修改 Makefile
           if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
             sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
           else
             sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
           fi
-          
-          echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
+          echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
       - name: Run custom-script-2 (Download official config & append packages)
         working-directory: /workdir/openwrt
         run: |
