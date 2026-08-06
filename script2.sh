@@ -47,6 +47,10 @@ sed -i '/CONFIG_TARGET_MULTI_PROFILE=y/d' .config
 # 追加自定义包（引入 LuCI 基础依赖保证界面与语言包生效）
 cat >> .config <<EOF
 
+#启用 LuCI 基础框架
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-base=y
+
 # 自定义软件及组件
 CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_curl=y
