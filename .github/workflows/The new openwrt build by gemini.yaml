@@ -113,16 +113,16 @@ jobs:
           VERSION=$(echo "$STABLE_TAG" | sed 's/^v//')
           echo "Detected OpenWrt version: $VERSION"
           
-          # 使用更健壮的正则提取 PKG_RELEASE
+          # 使用 awk 和 cut 提取 Version: 后边、第一个 - 之前的部分
           PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/targets/x86/64/packages/Packages" | \
                         grep -A 5 '^Package: base-files$' | \
-                        grep '^Version:' | head -1 | \
-                        sed -n 's/^Version: \([0-9]*\)~.*/\1/p')
+                        grep '^Version:' | head -n 1 | \
+                        awk '{print $2}' | cut -d'-' -f1)
           
           [ -z "$PKG_RELEASE" ] && PKG_RELEASE=$(curl -s "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/base/Packages" | \
-                                                  grep -A 5 '^Package: base-files$' | \
-                                                  grep '^Version:' | head -1 | \
-                                                  sed -n 's/^Version: \([0-9]*\)~.*/\1/p')
+                                                grep -A 5 '^Package: base-files$' | \
+                                                grep '^Version:' | head -n 1 | \
+                                                awk '{print $2}' | cut -d'-' -f1)
           
           if [ -n "$PKG_RELEASE" ]; then
             MAKE_FILE="package/base-files/Makefile"
