@@ -147,18 +147,16 @@ jobs:
           
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
-      - name: Apply base config
+      - name: Run custom-script-2 (Download official config & append packages)
         working-directory: /workdir/openwrt
         run: |
-          [ -f $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
-          make defconfig
-
-      - name: Run custom-script-2 (append custom packages)
-        working-directory: /workdir/openwrt
-        run: |
-          [ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2
-          # script2.sh 会追加自定义包，并执行 make oldconfig
-          # 注意：script2.sh 内部不应再执行 make defconfig
+          if [ -f "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2" ]; then
+            chmod +x "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
+            "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
+          else
+            echo "Error: $CUSTOM_SCRIPT_2 not found!"
+            exit 1
+          fi
 
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@main
