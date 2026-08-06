@@ -61,6 +61,6 @@ CONFIG_PACKAGE_luci-i18n-irqbalance-zh-cn=y
 EOF
 
 # 补全依赖并整理 .config
-make oldconfig
+make defconfig
 
 grep -E "bash|curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance|luci-i18n-base-zh-cn|luci-i18n-irqbalance-zh-cn" .config
