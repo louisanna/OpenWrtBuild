@@ -124,15 +124,15 @@ jobs:
             PKG_RELEASE=$(curl -s "$BASE_URL/$p/Packages" | awk '/^Package: base-files/{f=1} f && /^Version:/{print $2; exit}')
             [ -n "$PKG_RELEASE" ] && echo "Extracted from Packages: $PKG_RELEASE" && break
             
-            # 2. 如果 Packages 无效，尝试从目录列表获取 (增加 head -1 防止多次匹配导致的多行问题)
+            # 2. 加入 head -1，确保只截取第一个匹配项
             PKG_RELEASE=$(curl -s "$BASE_URL/$p/" | grep -oE 'base-files-[^"]*\.(ipk|apk)' | head -1 | sed -E 's/base-files-(.+)\.[^.]+/\1/')
             [ -n "$PKG_RELEASE" ] && echo "Extracted from directory: $PKG_RELEASE" && break
           done
 
-          # 安全机制：彻底清除变量中可能包含的回车、换行和多余空格
+          # 3. 终极保险：清除任何可能存在的换行符和空格
           PKG_RELEASE=$(echo "$PKG_RELEASE" | tr -d ' \n\r')
 
-          # 错误处理
+          # 错误处理精简为单行
           [ -z "$PKG_RELEASE" ] && { echo "ERROR: Failed to detect PKG_RELEASE."; exit 1; }
 
           MAKE_FILE="package/base-files/Makefile"
