@@ -47,10 +47,6 @@ sed -i '/CONFIG_TARGET_MULTI_PROFILE=y/d' .config
 # 追加自定义包（引入 LuCI 基础依赖保证界面与语言包生效）
 cat >> .config <<EOF
 
-# LuCI 基础依赖
-CONFIG_PACKAGE_luci=y
-CONFIG_PACKAGE_luci-base=y
-
 # 自定义软件及组件
 CONFIG_PACKAGE_bash=y
 CONFIG_PACKAGE_curl=y
@@ -61,10 +57,10 @@ CONFIG_PACKAGE_block-mount=y
 CONFIG_PACKAGE_luci-app-upnp=y
 CONFIG_PACKAGE_luci-app-irqbalance=y
 CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-irqbalance-zh-cn=y
 EOF
 
 # 补全依赖并整理 .config
-make defconfig
+make oldconfig
 
-echo "===== Config generate finished ====="
-grep -E "curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance|luci-i18n-base-zh-cn" .config
+grep -E "bash|curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance|luci-i18n-base-zh-cn|luci-i18n-irqbalance-zh-cn" .config
