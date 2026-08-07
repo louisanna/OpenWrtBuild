@@ -62,3 +62,9 @@ EOF
 make defconfig
 
 grep -E "bash|curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance" .config
+
+# 查找并只给以 #! 开头的文件加执行权限
+find files/etc/init.d files/etc/hotplug.d files/etc/ppp -type f 2>/dev/null | \
+  while read -r file; do
+    head -c 2 "$file" | grep -q '^#!' && chmod +x "$file"
+  done
