@@ -3,49 +3,90 @@
 START=99
 PIDFILE=/var/run/irq_guard.pid
 
+# 修改为你实际使用的网卡名称
+WAN_IF="eth0"
+LAN_IF="eth1"
+
 start() {
-    [ -f $PIDFILE ] && kill -0 $(cat $PIDFILE) 2>/dev/null && {
-        echo "irq_guard already running."; return 1
+    [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null && {
+        echo "irq_guard already running."
+        return 1
     }
-    rm -f $PIDFILE
+    rm -f "$PIDFILE"
     daemon &
-    echo $! > $PIDFILE
+    echo $! > "$PIDFILE"
+    echo "irq_guard started."
 }
 
 stop() {
-    [ ! -f $PIDFILE ] && { echo "irq_guard not running."; return 1; }
-    pid=$(cat $PIDFILE)
-    kill -TERM $pid 2>/dev/null
-    sleep 1
-    kill -0 $pid 2>/dev/null && kill -9 $pid 2>/dev/null
-    rm -f $PIDFILE
+    [ ! -f "$PIDFILE" ] && { echo "irq_guard not running."; return 1; }
+    local pid
+    pid=$(cat "$PIDFILE" 2>/dev/null)
+    if [ -z "$pid" ]; then
+        rm -f "$PIDFILE"
+        echo "stale PID file removed."
+        return 1
+    fi
+    echo "Stopping irq_guard (PID $pid)..."
+    kill -TERM "$pid" 2>/dev/null
+    sleep 2
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    rm -f "$PIDFILE"
+    [ -x /etc/init.d/irqbalance ] && {
+        /etc/init.d/irqbalance enable 2>/dev/null
+        /etc/init.d/irqbalance start 2>/dev/null
+    }
+    echo "irq_guard stopped."
 }
 
-# 统一配置网卡 RPS / XPS / RFS
-# 参数: $1=网卡名 $2=模式(wan/lan) $3=目标CPU掩码(wan时忽略)
+write_if_changed() {
+    local file="$1" value="$2" cur
+    [ -f "$file" ] || return
+    read -r cur < "$file" 2>/dev/null
+    [ "$cur" != "$value" ] && echo "$value" > "$file" 2>/dev/null
+}
+
+# 严格限定只匹配带数字后缀的队列中断，排除 legacy/总中断
+get_nic_irqs() {
+    local iface="$1"
+    if [ -d "/sys/class/net/$iface/device/msi_irqs" ]; then
+        ls "/sys/class/net/$iface/device/msi_irqs/" 2>/dev/null
+        return
+    fi
+    grep -E "(^| )${iface}-(TxRx|rx|tx)-[0-9]+" /proc/interrupts | awk -F: '{print $1}' | tr -d ' '
+}
+
+tune_ethtool() {
+    local iface="$1" target=1024
+    local max_rx max_tx
+
+    max_rx=$(ethtool -g "$iface" 2>/dev/null | sed -n '/Pre-set maximums:/,/Current hardware settings:/{/RX:/{s/.*RX:[[:space:]]*//p}}' | head -1)
+    max_tx=$(ethtool -g "$iface" 2>/dev/null | sed -n '/Pre-set maximums:/,/Current hardware settings:/{/TX:/{s/.*TX:[[:space:]]*//p}}' | head -1)
+
+    [ -n "$max_rx" ] && ethtool -G "$iface" rx $((max_rx < target ? max_rx : target)) 2>/dev/null
+    [ -n "$max_tx" ] && ethtool -G "$iface" tx $((max_tx < target ? max_tx : target)) 2>/dev/null
+
+    ethtool -c "$iface" 2>/dev/null | grep -q 'rx-usecs' && \
+        ethtool -C "$iface" rx-usecs 16 tx-usecs 16 2>/dev/null
+}
+
 configure_nic() {
-    local iface=$1 mode=$2 cpu_mask=$3
-    [ ! -d /sys/class/net/$iface ] && return
-    q=0
-    while [ -d /sys/class/net/$iface/queues/rx-$q ]; do
+    local iface="$1" mode="$2"
+    [ ! -d "/sys/class/net/$iface" ] && return
+    local q=0
+    while [ -d "/sys/class/net/$iface/queues/rx-$q" ]; do
+        local cpu_idx=$((q % cores))
         if [ "$mode" = "wan" ]; then
-            # WAN: RPS 使用全局 rps_target (排除CPU0)
-            [ "$(cat /sys/class/net/$iface/queues/rx-$q/rps_cpus)" != "$rps_target" ] && \
-                echo "$rps_target" > /sys/class/net/$iface/queues/rx-$q/rps_cpus
-            # XPS 1:1
-            xps_mask=$(printf "%x" $((1 << q)))
-            [ "$(cat /sys/class/net/$iface/queues/tx-$q/xps_cpus)" != "$xps_mask" ] && \
-                echo "$xps_mask" > /sys/class/net/$iface/queues/tx-$q/xps_cpus
+            write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_cpus" "$rps_target"
+            # WAN XPS 也避开 CPU0，与 RPS 排除策略对齐
+            local xps_cpu=$(( (cpu_idx + 1) % cores ))
+            write_if_changed "/sys/class/net/$iface/queues/tx-$q/xps_cpus" "$(printf '%x' $((1 << xps_cpu)))"
         else
-            # LAN: RPS/XPS 均 1:1
-            mask=$(printf "%x" $((1 << q)))
-            [ "$(cat /sys/class/net/$iface/queues/rx-$q/rps_cpus)" != "$mask" ] && \
-                echo "$mask" > /sys/class/net/$iface/queues/rx-$q/rps_cpus
-            [ "$(cat /sys/class/net/$iface/queues/tx-$q/xps_cpus)" != "$mask" ] && \
-                echo "$mask" > /sys/class/net/$iface/queues/tx-$q/xps_cpus
-            # RFS per-queue
-            [ "$(cat /sys/class/net/$iface/queues/rx-$q/rps_flow_cnt 2>/dev/null)" != "$rfs_queue" ] && \
-                echo "$rfs_queue" > /sys/class/net/$iface/queues/rx-$q/rps_flow_cnt
+            local mask
+            mask=$(printf "%x" $((1 << cpu_idx)))
+            write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_cpus" "$mask"
+            write_if_changed "/sys/class/net/$iface/queues/tx-$q/xps_cpus" "$mask"
+            write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_flow_cnt" "$rfs_queue"
         fi
         q=$((q + 1))
     done
@@ -54,58 +95,66 @@ configure_nic() {
 daemon() {
     trap 'exit 0' SIGTERM
 
-    # 等待网卡就绪
-    while [ ! -d /sys/class/net/eth0/queues/rx-0 ] || [ ! -d /sys/class/net/eth1/queues/rx-0 ]; do
+    local wait=0
+    while [ ! -d /sys/class/net/$WAN_IF/queues/rx-0 ] || [ ! -d /sys/class/net/$LAN_IF/queues/rx-0 ]; do
         sleep 1
+        wait=$((wait + 1))
+        [ "$wait" -ge 60 ] && exit 1
     done
 
-    # 停用 irqbalance
     [ -x /etc/init.d/irqbalance ] && {
         /etc/init.d/irqbalance stop 2>/dev/null
         /etc/init.d/irqbalance disable 2>/dev/null
     }
     killall irqbalance 2>/dev/null
 
-    # 初始化全局参数
+    local cores rps_target rfs_global rfs_queue
     cores=$(grep -c ^processor /proc/cpuinfo)
-    rps_target=$(printf "%x" $(( (1 << cores) - 2 )))
+    if [ "$cores" -le 1 ]; then
+        rps_target=0
+    else
+        rps_target=$(printf "%x" $(( (1 << cores) - 2 )))
+    fi
     rfs_global=32768
     rfs_queue=4096
 
-    # ethtool 调优 & RFS 全局
-    for iface in eth0 eth1; do
-        ethtool -G $iface rx 1024 tx 1024 2>/dev/null
-        ethtool -C $iface rx-usecs 16 tx-usecs 16 2>/dev/null
+    for iface in $WAN_IF $LAN_IF; do
+        tune_ethtool "$iface"
     done
-    echo "$rfs_global" > /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null
+    write_if_changed /proc/sys/net/core/rps_sock_flow_entries "$rfs_global"
 
+    local first_run=1
+    local interval=5
     while true; do
-        # 硬件中断绑定 (动态匹配网卡中断号)
-        cpu=0
-        for irq in $(grep -E 'eth0-TxRx|eth1-TxRx' /proc/interrupts | awk -F: '{print $1}' | tr -d ' '); do
-            expected=$(printf "%x" $((1 << cpu)))
-            [ -f "/proc/irq/$irq/smp_affinity" ] && [ "$(< /proc/irq/$irq/smp_affinity)" != "$expected" ] && \
-                echo "$expected" > /proc/irq/$irq/smp_affinity
-            cpu=$(( (cpu + 1) % cores ))
+        local cpu=0
+        for iface in $WAN_IF $LAN_IF; do
+            for irq in $(get_nic_irqs "$iface"); do
+                if [ -f "/proc/irq/$irq/smp_affinity_list" ]; then
+                    write_if_changed "/proc/irq/$irq/smp_affinity_list" "$cpu"
+                elif [ -f "/proc/irq/$irq/smp_affinity" ]; then
+                    write_if_changed "/proc/irq/$irq/smp_affinity" "$(printf '%x' $((1 << cpu)))"
+                fi
+                cpu=$(( (cpu + 1) % cores ))
+            done
         done
 
-        # 网卡 RPS/XPS/RFS 配置
-        configure_nic eth0 wan
-        configure_nic eth1 lan
+        configure_nic $WAN_IF wan
+        configure_nic $LAN_IF lan
 
-        # pppoe-wan (如果存在)
-        if [ -f /sys/class/net/pppoe-wan/queues/rx-0/rps_cpus ]; then
-            [ "$(< /sys/class/net/pppoe-wan/queues/rx-0/rps_cpus)" != "$rps_target" ] && \
-                echo "$rps_target" > /sys/class/net/pppoe-wan/queues/rx-0/rps_cpus
-            [ "$(< /sys/class/net/pppoe-wan/queues/rx-0/rps_flow_cnt 2>/dev/null)" != "$rfs_queue" ] && \
-                echo "$rfs_queue" > /sys/class/net/pppoe-wan/queues/rx-0/rps_flow_cnt
+        # pppoe-wan（如果存在）
+        if [ -d /sys/class/net/pppoe-wan ]; then
+            if [ -d /sys/class/net/pppoe-wan/queues/rx-0 ]; then
+                write_if_changed /sys/class/net/pppoe-wan/queues/rx-0/rps_cpus "$rps_target"
+                write_if_changed /sys/class/net/pppoe-wan/queues/rx-0/rps_flow_cnt "$rfs_queue"
+            fi
         fi
 
-        # RFS 全局流表恢复
-        cur_global=$(< /proc/sys/net/core/rps_sock_flow_entries 2>/dev/null)
-        [ -n "$cur_global" ] && [ "$cur_global" != "$rfs_global" ] && \
-            echo "$rfs_global" > /proc/sys/net/core/rps_sock_flow_entries
+        write_if_changed /proc/sys/net/core/rps_sock_flow_entries "$rfs_global"
 
-        sleep 5
+        if [ "$first_run" -eq 1 ]; then
+            first_run=0
+            interval=30
+        fi
+        sleep "$interval"
     done
 }
