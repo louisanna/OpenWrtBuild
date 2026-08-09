@@ -3,7 +3,6 @@
 START=99
 PIDFILE=/var/run/irq_guard.pid
 
-# 修改为你实际使用的网卡名称
 WAN_IF="eth0"
 LAN_IF="eth1"
 
@@ -32,11 +31,7 @@ stop() {
     sleep 2
     kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
     rm -f "$PIDFILE"
-    [ -x /etc/init.d/irqbalance ] && {
-        /etc/init.d/irqbalance enable 2>/dev/null
-        /etc/init.d/irqbalance start 2>/dev/null
-    }
-    echo "irq_guard stopped."
+
 }
 
 write_if_changed() {
@@ -46,7 +41,6 @@ write_if_changed() {
     [ "$cur" != "$value" ] && echo "$value" > "$file" 2>/dev/null
 }
 
-# 严格限定只匹配带数字后缀的队列中断，排除 legacy/总中断
 get_nic_irqs() {
     local iface="$1"
     if [ -d "/sys/class/net/$iface/device/msi_irqs" ]; then
@@ -63,11 +57,26 @@ tune_ethtool() {
     max_rx=$(ethtool -g "$iface" 2>/dev/null | sed -n '/Pre-set maximums:/,/Current hardware settings:/{/RX:/{s/.*RX:[[:space:]]*//p}}' | head -1)
     max_tx=$(ethtool -g "$iface" 2>/dev/null | sed -n '/Pre-set maximums:/,/Current hardware settings:/{/TX:/{s/.*TX:[[:space:]]*//p}}' | head -1)
 
-    [ -n "$max_rx" ] && ethtool -G "$iface" rx $((max_rx < target ? max_rx : target)) 2>/dev/null
-    [ -n "$max_tx" ] && ethtool -G "$iface" tx $((max_tx < target ? max_tx : target)) 2>/dev/null
+    # 增加 || true 防止意外退出
+    [ -n "$max_rx" ] && { ethtool -G "$iface" rx $((max_rx < target ? max_rx : target)) 2>/dev/null || true; }
+    [ -n "$max_tx" ] && { ethtool -G "$iface" tx $((max_tx < target ? max_tx : target)) 2>/dev/null || true; }
 
-    ethtool -c "$iface" 2>/dev/null | grep -q 'rx-usecs' && \
-        ethtool -C "$iface" rx-usecs 16 tx-usecs 16 2>/dev/null
+    ethtool -c "$iface" 2>/dev/null | grep -q 'rx-usecs' && {
+        ethtool -C "$iface" rx-usecs 16 tx-usecs 16 2>/dev/null || true
+    }
+}
+
+# 绑定指定网卡的中断到从 start_cpu 开始的连续核心（轮转）
+bind_irqs_to_cores() {
+    local iface="$1" start_cpu="$2" cpu=$start_cpu
+    for irq in $(get_nic_irqs "$iface"); do
+        if [ -f "/proc/irq/$irq/smp_affinity_list" ]; then
+            write_if_changed "/proc/irq/$irq/smp_affinity_list" "$cpu"
+        elif [ -f "/proc/irq/$irq/smp_affinity" ]; then
+            write_if_changed "/proc/irq/$irq/smp_affinity" "$(printf '%x' $((1 << cpu)))"
+        fi
+        cpu=$(( (cpu + 1) % cores ))
+    done
 }
 
 configure_nic() {
@@ -78,9 +87,13 @@ configure_nic() {
         local cpu_idx=$((q % cores))
         if [ "$mode" = "wan" ]; then
             write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_cpus" "$rps_target"
-            # WAN XPS 也避开 CPU0，与 RPS 排除策略对齐
-            local xps_cpu=$(( (cpu_idx + 1) % cores ))
-            write_if_changed "/sys/class/net/$iface/queues/tx-$q/xps_cpus" "$(printf '%x' $((1 << xps_cpu)))"
+            write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_flow_cnt" "$rfs_queue"
+            if [ "$cores" -gt 1 ]; then
+                local xps_cpu=$(( cpu_idx % (cores - 1) + 1 ))
+                write_if_changed "/sys/class/net/$iface/queues/tx-$q/xps_cpus" "$(printf '%x' $((1 << xps_cpu)))"
+            else
+                write_if_changed "/sys/class/net/$iface/queues/tx-$q/xps_cpus" "1"
+            fi
         else
             local mask
             mask=$(printf "%x" $((1 << cpu_idx)))
@@ -102,20 +115,33 @@ daemon() {
         [ "$wait" -ge 60 ] && exit 1
     done
 
-    [ -x /etc/init.d/irqbalance ] && {
+    # 处理 irqbalance：记录是否由我们禁用
+    if [ -x /etc/init.d/irqbalance ] && /etc/init.d/irqbalance enabled 2>/dev/null; then
         /etc/init.d/irqbalance stop 2>/dev/null
         /etc/init.d/irqbalance disable 2>/dev/null
-    }
+    fi
     killall irqbalance 2>/dev/null
 
     local cores rps_target rfs_global rfs_queue
     cores=$(grep -c ^processor /proc/cpuinfo)
+
+    # RPS target 跳过 CPU0
     if [ "$cores" -le 1 ]; then
         rps_target=0
     else
         rps_target=$(printf "%x" $(( (1 << cores) - 2 )))
     fi
-    rfs_global=32768
+
+    # 动态 RFS 全局条目：可用内存/32，封顶65536，保底8192
+    local mem_kb
+    mem_kb=$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null)
+    if [ -n "$mem_kb" ] && [ "$mem_kb" -gt 0 ]; then
+        rfs_global=$(( mem_kb / 32 ))
+        [ "$rfs_global" -gt 65536 ] && rfs_global=65536
+        [ "$rfs_global" -lt 8192 ] && rfs_global=8192
+    else
+        rfs_global=32768
+    fi
     rfs_queue=4096
 
     for iface in $WAN_IF $LAN_IF; do
@@ -126,27 +152,23 @@ daemon() {
     local first_run=1
     local interval=5
     while true; do
-        local cpu=0
-        for iface in $WAN_IF $LAN_IF; do
-            for irq in $(get_nic_irqs "$iface"); do
-                if [ -f "/proc/irq/$irq/smp_affinity_list" ]; then
-                    write_if_changed "/proc/irq/$irq/smp_affinity_list" "$cpu"
-                elif [ -f "/proc/irq/$irq/smp_affinity" ]; then
-                    write_if_changed "/proc/irq/$irq/smp_affinity" "$(printf '%x' $((1 << cpu)))"
-                fi
-                cpu=$(( (cpu + 1) % cores ))
-            done
-        done
+        # 固定起始核心，错开 WAN/LAN 硬中断分布
+        local wan_start=0
+        local lan_start=$(( cores / 2 ))   # 4核时为2，2核时为1
+        bind_irqs_to_cores "$WAN_IF" $wan_start
+        bind_irqs_to_cores "$LAN_IF" $lan_start
 
         configure_nic $WAN_IF wan
         configure_nic $LAN_IF lan
 
-        # pppoe-wan（如果存在）
+        # pppoe-wan 多队列支持
         if [ -d /sys/class/net/pppoe-wan ]; then
-            if [ -d /sys/class/net/pppoe-wan/queues/rx-0 ]; then
-                write_if_changed /sys/class/net/pppoe-wan/queues/rx-0/rps_cpus "$rps_target"
-                write_if_changed /sys/class/net/pppoe-wan/queues/rx-0/rps_flow_cnt "$rfs_queue"
-            fi
+            local q=0
+            while [ -d "/sys/class/net/pppoe-wan/queues/rx-$q" ]; do
+                write_if_changed "/sys/class/net/pppoe-wan/queues/rx-$q/rps_cpus" "$rps_target"
+                write_if_changed "/sys/class/net/pppoe-wan/queues/rx-$q/rps_flow_cnt" "$rfs_queue"
+                q=$((q + 1))
+            done
         fi
 
         write_if_changed /proc/sys/net/core/rps_sock_flow_entries "$rfs_global"
