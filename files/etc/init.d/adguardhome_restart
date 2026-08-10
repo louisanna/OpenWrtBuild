@@ -1,0 +1,44 @@
+#!/bin/sh /etc/rc.common
+
+USE_PROCD=1
+START=99
+
+BINARY="/overlay/AdGuardHome/AdGuardHome"
+CONFIG="/overlay/AdGuardHome.yaml"
+WORKDIR="/tmp/AdGuardHome"
+
+start_service() {
+    if [ ! -f "$BINARY" ]; then
+        echo "AdGuardHome binary not found, skipping."
+        return 1
+    fi
+
+    # ---- 1. 主动停止当前正在运行的 AdGuardHome（如果有） ----
+    # 先尝试用 AdGuardHome 自带的 -s stop（兼容你的原始习惯）
+    if [ -x "$BINARY" ]; then
+        "$BINARY" -s stop 2>/dev/null
+    fi
+
+    # 再保险：用 killall 强杀残留进程（确保彻底停止）
+    killall AdGuardHome 2>/dev/null
+
+    # ---- 2. 清理并重建工作目录 ----
+    rm -rf "$WORKDIR"
+    mkdir -p -m 755 "$WORKDIR"
+
+    # ---- 3. 用 procd 启动 AdGuardHome（这才是正确的启动方式） ----
+    procd_open_instance
+    procd_set_param command "$BINARY"
+    procd_append_param command -w "$WORKDIR"
+    procd_append_param command -c "$CONFIG"
+    procd_set_param respawn  # 崩溃后自动重启
+    procd_close_instance
+
+    echo "AdGuardHome started (procd managed) with config $CONFIG"
+}
+
+stop_service() {
+    # procd 会自动终止进程，但如果你想额外清理目录，可以打开注释
+    # rm -rf "$WORKDIR"
+    echo "AdGuardHome stopped by procd"
+}

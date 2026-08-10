@@ -44,11 +44,16 @@ write_if_changed() {
 get_nic_irqs() {
     local iface="$1"
     if [ -d "/sys/class/net/$iface/device/msi_irqs" ]; then
-        ls "/sys/class/net/$iface/device/msi_irqs/" 2>/dev/null
+        for irq in $(ls "/sys/class/net/$iface/device/msi_irqs/" 2>/dev/null); do
+            if grep -qE "(^| )${iface}-(TxRx|rx|tx)-[0-9]+" /proc/interrupts | grep -w "$irq:" >/dev/null 2>&1; then
+                echo "$irq"
+            fi
+        done
         return
     fi
     grep -E "(^| )${iface}-(TxRx|rx|tx)-[0-9]+" /proc/interrupts | awk -F: '{print $1}' | tr -d ' '
 }
+
 
 tune_ethtool() {
     local iface="$1" target=1024
