@@ -187,6 +187,13 @@ jobs:
         id: compile
         run: |
           set +e
+              # 临时 workaround：先单独编译 libnftnl（清理 + 单线程编译）
+          echo "===== Building libnftnl separately (workaround) ====="
+          make package/libs/libnftnl/clean
+          make package/libs/libnftnl/compile -j1 V=s || {
+            echo "libnftnl still fails, exiting..."
+            exit 1
+          }
           make -j$(nproc) || make -j1 || make -j1 V=s
           BUILD_STATUS=$?
           if [ $BUILD_STATUS -eq 0 ]; then
