@@ -187,21 +187,32 @@ jobs:
         id: compile
         run: |
           set +e
+          - name: Compile the firmware
+  working-directory: /workdir/openwrt
+  id: compile
+  run: |
+    set +e
+
+    # 1. 构建 host 工具和 toolchain（确保 sed 等工具可用）
+        echo "===== Preparing host tools and toolchain ====="
+        make tools/install
+        make toolchain/install
+
               # 临时 workaround：先单独编译 libnftnl（清理 + 单线程编译）
-          echo "===== Building libnftnl separately (workaround) ====="
-          make package/libs/libnftnl/clean
-          make package/libs/libnftnl/compile -j1 V=s || {
-            echo "libnftnl still fails, exiting..."
-            exit 1
-          }
-          make -j$(nproc) || make -j1 || make -j1 V=s
-          BUILD_STATUS=$?
-          if [ $BUILD_STATUS -eq 0 ]; then
-            echo "status=success" >> $GITHUB_OUTPUT
-          else
-            echo "status=failure" >> $GITHUB_OUTPUT
-          fi
-          exit $BUILD_STATUS
+        echo "===== Building libnftnl separately (workaround) ====="
+        make package/libs/libnftnl/clean
+        make package/libs/libnftnl/compile -j1 V=s || {
+          echo "libnftnl still fails, exiting..."
+          exit 1
+        }
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        BUILD_STATUS=$?
+        if [ $BUILD_STATUS -eq 0 ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+        fi
+        exit $BUILD_STATUS
 
       - name: Organize firmware-related files
         working-directory: /workdir/openwrt
