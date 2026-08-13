@@ -153,6 +153,11 @@ jobs:
 
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
+      - name: Add Full Cone NAT support
+        working-directory: /workdir/openwrt
+        run: |
+          curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
+
       - name: Run custom-script-2 (Download official config & append packages)
         working-directory: /workdir/openwrt
         run: |
