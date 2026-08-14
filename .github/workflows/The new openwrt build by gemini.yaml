@@ -7,10 +7,6 @@ on:
         description: "Build new firmware anyway"
         required: true
         default: "true"
-      ssh:
-        description: "Enable SSH debugging"
-        required: false
-        default: "false"
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
@@ -104,23 +100,15 @@ jobs:
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
           cp -r $GITHUB_WORKSPACE/files /workdir/openwrt/ || true
 
-      # ================= 新增：缓存交叉编译工具链 =================
       - name: Cache toolchain
         id: cache-toolchain
         uses: actions/cache@v5
         with:
           path: openwrt/staging_dir/toolchain-*
-          key: toolchain-${{ env.STABLE_TAG }}-${{ env.REPO_BRANCH }}
+          key: toolchain-${{ env.STABLE_TAG }}-x86_64
           restore-keys: |
-            toolchain-${{ env.STABLE_TAG }}-
+            toolchain-${{ env.STABLE_TAG }}-x86_64
             toolchain-
-
-      - name: Build toolchain (if not cached)
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        working-directory: /workdir/openwrt
-        run: |
-          echo "Toolchain cache miss, building now..."
-          make toolchain/compile -j$(nproc)
 
       - name: Run custom-script-1 & Update feeds
         working-directory: /workdir/openwrt
@@ -141,14 +129,11 @@ jobs:
 
           for p in "${PATHS[@]}"; do
             echo "Trying path: $p"
-            # 1. 优先尝试解析 Packages 文件
             PKG_RELEASE=$(curl -s "$BASE_URL/$p/Packages" | awk '/^Package: base-files/{f=1} f && /^Version:/{print $2; exit}')
             if [ -n "$PKG_RELEASE" ]; then
               PKG_RELEASE=$(echo "$PKG_RELEASE" | grep -oE '^[0-9]+')
               [ -n "$PKG_RELEASE" ] && echo "Extracted from Packages: $PKG_RELEASE" && break
             fi
-
-            # 2. 尝试从目录列表提取
             PKG_RELEASE=$(curl -s "$BASE_URL/$p/" | grep -oE 'base-files-[^"]*\.(ipk|apk)' | head -1 | sed -E 's/base-files-(.+)\.[^.]+/\1/')
             if [ -n "$PKG_RELEASE" ]; then
               PKG_RELEASE=$(echo "$PKG_RELEASE" | grep -oE '^[0-9]+')
@@ -156,39 +141,28 @@ jobs:
             fi
           done
 
-          # 清除多余空白
           PKG_RELEASE=$(echo "$PKG_RELEASE" | tr -d ' \n\r')
-
-          # 错误处理
           [ -z "$PKG_RELEASE" ] && { echo "ERROR: Failed to detect PKG_RELEASE."; exit 1; }
 
           MAKE_FILE="package/base-files/Makefile"
           [ ! -f "$MAKE_FILE" ] && { echo "ERROR: $MAKE_FILE not found!"; exit 1; }
 
-          # 修改 Makefile
           if grep -q "^PKG_RELEASE:=" "$MAKE_FILE"; then
             sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$PKG_RELEASE/" "$MAKE_FILE"
           else
             sed -i "/^PKG_VERSION:=/a PKG_RELEASE:=$PKG_RELEASE" "$MAKE_FILE"
           fi
-
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
-      - name: Add Full Cone NAT support
+      - name: Add Full Cone NAT support & verify fix
         working-directory: /workdir/openwrt
         run: |
           curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
-          # Fix libnftnl build issue (https://github.com/mufeng05/openwrt-sonic-fullcone/issues/4)
-          sed -i '/^PKG_BUILD_PARALLEL:=1/a PKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
-
-      # ================= 新增：验证修复是否成功应用 =================
-      - name: Verify libnftnl fix applied
-        working-directory: /workdir/openwrt
-        run: |
+          sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
           if grep -q "PKG_FIXUP:=autoreconf" package/libs/libnftnl/Makefile; then
-            echo "✅ libnftnl fix applied successfully"
+            echo "libnftnl fix applied successfully"
           else
-            echo "❌ ERROR: PKG_FIXUP not found in package/libs/libnftnl/Makefile"
+            echo "ERROR: PKG_FIXUP not found in package/libs/libnftnl/Makefile"
             exit 1
           fi
 
@@ -203,12 +177,17 @@ jobs:
             exit 1
           fi
 
+      - name: Build toolchain (if not cached)
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        working-directory: /workdir/openwrt
+        run: |
+          export TERM=linux
+          echo "Toolchain cache miss, building now..."
+          make toolchain/compile -j$(nproc)
+
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@main
         if: github.event.inputs.ssh == 'true'
-        env:
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
 
       - name: Download packages
         working-directory: /workdir/openwrt
@@ -275,7 +254,6 @@ jobs:
             TITLE="OpenWRT 编译失败"
             BODY="编译过程出现问题，请检查 GitHub Actions 日志。"
           fi
-
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
