@@ -158,10 +158,8 @@ jobs:
           curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
           
           #Create automake-1.17 symlink for libnftnl
-          cd /workdir/openwrt
-          mkdir -p staging_dir/host/bin
-          ln -sf staging_dir/host/bin/automake staging_dir/host/bin/automake-1.17
-          echo "$(pwd)/staging_dir/host/bin" >> $GITHUB_PATH
+          cd openwrt
+          sed -i '/^PKG_BUILD_PARALLEL:=1/a PKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
 
       - name: Run custom-script-2 (Download official config & append packages)
         working-directory: /workdir/openwrt
