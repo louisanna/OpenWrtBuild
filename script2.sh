@@ -57,13 +57,12 @@ CONFIG_PACKAGE_block-mount=y
 CONFIG_PACKAGE_luci-app-upnp=y
 CONFIG_PACKAGE_miniupnpd-nftables=y
 CONFIG_PACKAGE_luci-app-irqbalance=y
-CONFIG_NFT_FULLCONE=y
-CONFIG_NETFILTER_XT_MATCH_FULLCONE=y
-CONFIG_NETFILTER_XT_TARGET_FULLCONE=y
 EOF
 
 # 补全依赖并整理 .config
 make defconfig
+# 强制同步内核配置
+make kernel_oldconfig
 
 grep -E "bash|curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance" .config
 
