@@ -72,7 +72,8 @@ find files/etc/init.d files/etc/hotplug.d files/etc/ppp -type f 2>/dev/null | \
 
 # ===== Fix libnftnl build issue due to missing automake-1.17 =====
 cd /workdir/openwrt
+mkdir -p staging_dir/host/bin
 ln -sf staging_dir/host/bin/automake staging_dir/host/bin/automake-1.17
 echo "$(pwd)/staging_dir/host/bin" >> $GITHUB_PATH
 export PATH="$(pwd)/staging_dir/host/bin:$PATH"
-echo "Created automake-1.17 symlink and added to PATH
+echo 'Created automake-1.17 symlink and added to PATH'
