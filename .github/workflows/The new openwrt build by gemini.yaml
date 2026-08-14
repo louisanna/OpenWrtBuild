@@ -160,7 +160,7 @@ jobs:
           curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
           sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
 
-      - name: Verify and enforce Full Cone kernel config
+      - name: Enforce Full Cone kernel config options
         working-directory: /workdir/openwrt
         run: |
           KERNEL_CONFIG="target/linux/x86/config-6.12"
@@ -174,12 +174,6 @@ jobs:
           else
             echo "ERROR: Kernel config file $KERNEL_CONFIG not found!"
             exit 1
-          fi
-
-          if ls target/linux/x86/patches-6.12/*fullcone* 1>/dev/null 2>&1; then
-            echo "Full Cone patches found."
-          else
-            echo "WARNING: Full Cone patches NOT found in patches-6.12!"
           fi
 
       - name: Run custom-script-2 (Download official config & append packages)
@@ -207,30 +201,28 @@ jobs:
           make download -j8
           find dl -size -1024c -exec rm -f {} \;
 
-      - name: Ensure Full Cone kernel options in build config
-        working-directory: /workdir/openwrt
-        run: |
-          KERNEL_BUILD_DIR="build_dir/target-x86_64_musl/linux-x86_64"
-          if [ -d "$KERNEL_BUILD_DIR" ]; then
-            cd "$KERNEL_BUILD_DIR"
-            if [ -f ".config" ]; then
-              grep -q "CONFIG_NFT_FULLCONE" .config || {
-                echo "CONFIG_NFT_FULLCONE=m" >> .config
-                echo "CONFIG_NETFILTER_XT_MATCH_FULLCONE=m" >> .config
-                echo "CONFIG_NETFILTER_XT_TARGET_FULLCONE=m" >> .config
-                echo "Added Full Cone options to kernel .config"
-                make oldconfig
-              }
-            fi
-          else
-            echo "Kernel build directory not yet created, skipping."
-          fi
-
       - name: Compile the firmware
         working-directory: /workdir/openwrt
         id: compile
         run: |
           set +e
+
+          # 强制确保内核配置包含 Full Cone 选项（双保险）
+          KERNEL_BUILD_DIR="build_dir/target-x86_64_musl/linux-x86_64"
+          if [ -d "$KERNEL_BUILD_DIR" ]; then
+            cd "$KERNEL_BUILD_DIR"
+            if [ -f ".config" ]; then
+              if ! grep -q "CONFIG_NFT_FULLCONE" .config; then
+                echo "CONFIG_NFT_FULLCONE=m" >> .config
+                echo "CONFIG_NETFILTER_XT_MATCH_FULLCONE=m" >> .config
+                echo "CONFIG_NETFILTER_XT_TARGET_FULLCONE=m" >> .config
+                echo "Added Full Cone options to kernel .config"
+                yes "" | make oldconfig
+              fi
+            fi
+            cd /workdir/openwrt
+          fi
+
           THREADS=$(nproc)
           echo "Available cores: $THREADS"
           echo "Attempting parallel build with $THREADS threads"
@@ -241,6 +233,7 @@ jobs:
               make -j1 V=s
             }
           }
+
           BUILD_STATUS=$?
           if [ $BUILD_STATUS -eq 0 ]; then
             echo "status=success" >> $GITHUB_OUTPUT
