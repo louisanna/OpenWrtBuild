@@ -12,7 +12,7 @@ env:
   REPO_URL: https://github.com/openwrt/openwrt.git
   CONFIG_FILE: example.config
   CUSTOM_SCRIPT_1: script1.sh
-  CUSTOM_SCRIPT_2: script2_1.sh
+  CUSTOM_SCRIPT_2: script2.sh
   STORE_PRODUCTS: false
   STORE_FIRMWARE: true
   RELEASE_FIRMWARE: false
@@ -156,6 +156,12 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
+          
+          #Create automake-1.17 symlink for libnftnl
+          cd /workdir/openwrt
+          mkdir -p staging_dir/host/bin
+          ln -sf staging_dir/host/bin/automake staging_dir/host/bin/automake-1.17
+          echo "$(pwd)/staging_dir/host/bin" >> $GITHUB_PATH
 
       - name: Run custom-script-2 (Download official config & append packages)
         working-directory: /workdir/openwrt
@@ -187,21 +193,6 @@ jobs:
         run: |
           set +e
 
-          # 1. 构建 host 工具和 toolchain（确保 sed 等工具可用）
-          echo "===== Preparing host tools and toolchain ====="
-          make tools/install
-          make toolchain/install
-
-          # 2. 临时 workaround：先单独编译 libnftnl（清理 + 单线程编译）
-          echo "===== Building libnftnl separately (workaround) ====="
-          make package/libs/libnftnl/clean
-          make package/libs/libnftnl/compile -j1 V=s || {
-            echo "libnftnl still fails, exiting..."
-            exit 1
-          }
-
-          # 3. 全量编译
-          echo "===== Full build ====="
           make -j$(nproc) || make -j1 || make -j1 V=s
 
           BUILD_STATUS=$?
