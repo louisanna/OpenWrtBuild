@@ -154,16 +154,15 @@ jobs:
           fi
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
-      - name: Add Full Cone NAT support & verify fix
+      - name: Add Full Cone NAT patches
         working-directory: /workdir/openwrt
         run: |
-          # 1. 运行官方脚本（自动打补丁）
           curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
-
-          # 2. 修复 libnftnl 构建问题
           sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
 
-          # 3. 手动确保内核配置文件包含 Full Cone 选项（以防脚本未成功添加）
+      - name: Verify and enforce Full Cone kernel config
+        working-directory: /workdir/openwrt
+        run: |
           KERNEL_CONFIG="target/linux/x86/config-6.12"
           if [ -f "$KERNEL_CONFIG" ]; then
             grep -q "CONFIG_NFT_FULLCONE=y" "$KERNEL_CONFIG" || {
@@ -173,16 +172,14 @@ jobs:
               echo "Manually added Full Cone options to kernel config."
             }
           else
-            echo "WARNING: Kernel config file $KERNEL_CONFIG not found!"
+            echo "ERROR: Kernel config file $KERNEL_CONFIG not found!"
             exit 1
           fi
 
-          # 4. 验证补丁文件是否存在
           if ls target/linux/x86/patches-6.12/*fullcone* 1>/dev/null 2>&1; then
             echo "Full Cone patches found."
           else
-            echo "WARNING: Full Cone patches NOT found in patches-6.12! The build may fail or module may not be compiled.
-            exit 1
+            echo "WARNING: Full Cone patches NOT found in patches-6.12!"
           fi
 
       - name: Run custom-script-2 (Download official config & append packages)
@@ -204,10 +201,6 @@ jobs:
           echo "Toolchain cache miss, building now..."
           make toolchain/compile -j$(nproc)
 
-      - name: SSH connection to Actions
-        uses: P3TERX/ssh2actions@main
-        if: github.event.inputs.ssh == 'true'
-
       - name: Download packages
         working-directory: /workdir/openwrt
         run: |
@@ -217,11 +210,9 @@ jobs:
       - name: Ensure Full Cone kernel options in build config
         working-directory: /workdir/openwrt
         run: |
-          # 进入内核构建目录（如果存在）
           KERNEL_BUILD_DIR="build_dir/target-x86_64_musl/linux-x86_64"
           if [ -d "$KERNEL_BUILD_DIR" ]; then
             cd "$KERNEL_BUILD_DIR"
-            # 如果 .config 存在，检查并追加选项
             if [ -f ".config" ]; then
               grep -q "CONFIG_NFT_FULLCONE" .config || {
                 echo "CONFIG_NFT_FULLCONE=m" >> .config
@@ -230,12 +221,9 @@ jobs:
                 echo "Added Full Cone options to kernel .config"
                 make oldconfig
               }
-            else
-              echo "Kernel .config not found, will be generated during build."
             fi
           else
             echo "Kernel build directory not yet created, skipping."
-            exit 1
           fi
 
       - name: Compile the firmware
