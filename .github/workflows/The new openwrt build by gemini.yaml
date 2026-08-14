@@ -7,6 +7,10 @@ on:
         description: "Build new firmware anyway"
         required: true
         default: "true"
+      ssh:
+        description: "Enable SSH debugging"
+        required: false
+        default: "false"
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
@@ -100,6 +104,24 @@ jobs:
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
           cp -r $GITHUB_WORKSPACE/files /workdir/openwrt/ || true
 
+      # ================= 新增：缓存交叉编译工具链 =================
+      - name: Cache toolchain
+        id: cache-toolchain
+        uses: actions/cache@v5
+        with:
+          path: openwrt/staging_dir/toolchain-*
+          key: toolchain-${{ env.STABLE_TAG }}-${{ env.REPO_BRANCH }}
+          restore-keys: |
+            toolchain-${{ env.STABLE_TAG }}-
+            toolchain-
+
+      - name: Build toolchain (if not cached)
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        working-directory: /workdir/openwrt
+        run: |
+          echo "Toolchain cache miss, building now..."
+          make toolchain/compile -j$(nproc)
+
       - name: Run custom-script-1 & Update feeds
         working-directory: /workdir/openwrt
         run: |
@@ -156,10 +178,19 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
-          
-          #Create automake-1.17 symlink for libnftnl
-          cd openwrt
+          # Fix libnftnl build issue (https://github.com/mufeng05/openwrt-sonic-fullcone/issues/4)
           sed -i '/^PKG_BUILD_PARALLEL:=1/a PKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
+
+      # ================= 新增：验证修复是否成功应用 =================
+      - name: Verify libnftnl fix applied
+        working-directory: /workdir/openwrt
+        run: |
+          if grep -q "PKG_FIXUP:=autoreconf" package/libs/libnftnl/Makefile; then
+            echo "✅ libnftnl fix applied successfully"
+          else
+            echo "❌ ERROR: PKG_FIXUP not found in package/libs/libnftnl/Makefile"
+            exit 1
+          fi
 
       - name: Run custom-script-2 (Download official config & append packages)
         working-directory: /workdir/openwrt
@@ -190,9 +221,16 @@ jobs:
         id: compile
         run: |
           set +e
-
-          make -j$(nproc) || make -j1 || make -j1 V=s
-
+          THREADS=$(nproc)
+          echo "Available cores: $THREADS"
+          echo "Attempting parallel build with $THREADS threads"
+          make -j$THREADS || {
+            echo "Parallel build failed, falling back to single thread"
+            make -j1 || {
+              echo "Single thread failed, trying with verbose output"
+              make -j1 V=s
+            }
+          }
           BUILD_STATUS=$?
           if [ $BUILD_STATUS -eq 0 ]; then
             echo "status=success" >> $GITHUB_OUTPUT
