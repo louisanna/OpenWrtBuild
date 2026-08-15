@@ -95,7 +95,7 @@ jobs:
           sudo mkdir -p /workdir/ && sudo chown $USER:$USER /workdir/
 
       - name: Clone source code
-        working-directory: ${{ github.workspace }}
+        working-directory: /workdir
         run: |
           git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
