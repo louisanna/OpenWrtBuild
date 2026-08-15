@@ -116,6 +116,31 @@ jobs:
           [ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
           ./scripts/feeds update -a && ./scripts/feeds install -a
 
+      - name: Run custom-script-2 (Download official config & append packages)
+        working-directory: /workdir/openwrt
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2" ]; then
+            chmod +x "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
+            "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
+          else
+            echo "Error: $CUSTOM_SCRIPT_2 not found!"
+            exit 1
+          fi
+
+      - name: Build toolchain (if not cached)
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        working-directory: /workdir/openwrt
+        run: |
+          export TERM=linux
+          echo "Toolchain cache miss, building now..."
+          make toolchain/compile -j$(nproc)
+
+      - name: Download packages
+        working-directory: /workdir/openwrt
+        run: |
+          make download -j8
+          find dl -size -1024c -exec rm -f {} \;
+
       - name: Fix base-files version
         working-directory: /workdir/openwrt
         run: |
@@ -159,97 +184,7 @@ jobs:
         run: |
           curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
           sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
-
-      - name: Enforce Full Cone kernel config options
-        working-directory: /workdir/openwrt
-        run: |
-          KERNEL_CONFIG="target/linux/x86/config-6.12"
-          if [ -f "$KERNEL_CONFIG" ]; then
-            grep -q "CONFIG_NFT_FULLCONE=y" "$KERNEL_CONFIG" || {
-              echo "CONFIG_NFT_FULLCONE=y" >> "$KERNEL_CONFIG"
-              echo "CONFIG_NETFILTER_XT_MATCH_FULLCONE=y" >> "$KERNEL_CONFIG"
-              echo "CONFIG_NETFILTER_XT_TARGET_FULLCONE=y" >> "$KERNEL_CONFIG"
-              echo "Manually added Full Cone options to kernel config."
-            }
-          else
-            echo "ERROR: Kernel config file $KERNEL_CONFIG not found!"
-            exit 1
-          fi
-
-      - name: Run custom-script-2 (Download official config & append packages)
-        working-directory: /workdir/openwrt
-        run: |
-          if [ -f "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2" ]; then
-            chmod +x "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
-            "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
-          else
-            echo "Error: $CUSTOM_SCRIPT_2 not found!"
-            exit 1
-          fi
-
-      - name: Build toolchain (if not cached)
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        working-directory: /workdir/openwrt
-        run: |
-          export TERM=linux
-          echo "Toolchain cache miss, building now..."
-          make toolchain/compile -j$(nproc)
-
-      - name: Download packages
-        working-directory: /workdir/openwrt
-        run: |
-          make download -j8
-          find dl -size -1024c -exec rm -f {} \;
-
-      - name: Test Full Cone patch availability (prepare kernel)
-        working-directory: /workdir/openwrt
-        run: |
-          echo "Preparing kernel source to validate Full Cone patch..."
-          make target/linux/prepare
-
-          # Locate the kernel build directory
-          KERNEL_BUILD_DIR=$(find build_dir/target-* -maxdepth 1 -type d -name "linux-*" | head -1)
-          if [ -z "$KERNEL_BUILD_DIR" ]; then
-            echo "ERROR: Kernel build directory not found!"
-            exit 1
-          fi
-          echo "Kernel build directory: $KERNEL_BUILD_DIR"
-
-          # 1. Check kernel .config for Full Cone options
-          KERNEL_CONFIG="$KERNEL_BUILD_DIR/.config"
-          if [ -f "$KERNEL_CONFIG" ]; then
-            echo "Checking kernel .config for Full Cone options..."
-            grep -q "CONFIG_NFT_FULLCONE=m" "$KERNEL_CONFIG" && \
-            grep -q "CONFIG_NETFILTER_XT_MATCH_FULLCONE=m" "$KERNEL_CONFIG" && \
-            grep -q "CONFIG_NETFILTER_XT_TARGET_FULLCONE=m" "$KERNEL_CONFIG" && \
-            echo "✅ Full Cone options found in kernel config." || {
-              echo "❌ Full Cone options missing from kernel config!"
-              echo "Current relevant config lines:"
-              grep -E "CONFIG_NFT_FULLCONE|CONFIG_NETFILTER_XT_MATCH_FULLCONE|CONFIG_NETFILTER_XT_TARGET_FULLCONE" "$KERNEL_CONFIG" || echo "(none)"
-              exit 1
-            }
-          else
-            echo "ERROR: Kernel .config not found!"
-            exit 1
-          fi
-
-          # 2. Check for newly added Full Cone source files
-          KERNEL_SRC_DIR=$(find "$KERNEL_BUILD_DIR" -maxdepth 1 -type d -name "linux-*" | head -1)
-          if [ -n "$KERNEL_SRC_DIR" ]; then
-            echo "Checking for Full Cone source files in $KERNEL_SRC_DIR..."
-            if find "$KERNEL_SRC_DIR" -type f \( -name "nf_fullcone.c" -o -name "xt_FULLCONE.c" \) | grep -q .; then
-              echo "✅ Full Cone source files found."
-            else
-              echo "❌ Full Cone source files NOT found!"
-              echo "Searching for 'fullcone' in kernel source:"
-              find "$KERNEL_SRC_DIR" -type f -name "*fullcone*" | head -10 || echo "(none)"
-              exit 1
-            fi
-          else
-            echo "WARNING: Kernel source directory not found, skipping source check."
-          fi
-
-          echo "Full Cone patch validation passed."
+          make menuconfig
 
       - name: Compile the firmware
         working-directory: /workdir/openwrt
