@@ -185,7 +185,7 @@ jobs:
         run: |
           curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
           sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
-          make kernel_oldconfig
+          yes "" | make kernel_oldconfig
 
       - name: Compile the firmware
         working-directory: /workdir/openwrt
