@@ -2,7 +2,7 @@
 config upnpd 'config'
 	option enabled '1'
 	option download '10240'
-	option upload '1024'
+	option upload '10240'
 	option internal_iface 'lan'
 	option port '5000'
 	option upnp_lease_file '/var/run/miniupnpd.leases'
