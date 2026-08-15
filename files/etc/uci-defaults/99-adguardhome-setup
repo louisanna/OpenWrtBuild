@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# 解压到 /overlay/AdGuardHome
+cd /overlay || exit 1
+tar -xzvf AdGuardHome_linux_amd64.tar.gz
+rm -f AdGuardHome_linux_amd64.tar.gz   # 可删除压缩包节省空间
+
+# 执行 AdGuardHome 自带的安装命令（会注册 init 脚本，但可能不适合 OpenWrt）
+rm -rf /tmp/AdGuardHome
+mkdir -p -m 755 /tmp/AdGuardHome
+/overlay/AdGuardHome/AdGuardHome -s install -w /tmp/AdGuardHome -c /overlay/AdGuardHome.yaml
+
+# 为了兼容 OpenWrt，我们同时启用我们自己的 init 脚本
+/etc/init.d/adguardhome enable
+/etc/init.d/adguardhome start
+
+exit 0
