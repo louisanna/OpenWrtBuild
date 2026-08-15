@@ -38,6 +38,7 @@ jobs:
           echo "stable_tag=v$STABLE_VERSION" >> $GITHUB_OUTPUT
           echo "repo_branch=openwrt-$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
           echo "stable_version=$STABLE_VERSION" >> $GITHUB_ENV
+          echo "stable_major=$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
 
       - name: Check if new version
         id: check-cache
@@ -105,9 +106,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: openwrt/staging_dir/toolchain-*
-          key: toolchain-${{ env.STABLE_TAG }}-x86_64
+          key: toolchain-${{ needs.check.outputs.stable_major }}-x86_64
           restore-keys: |
-            toolchain-${{ env.STABLE_TAG }}-x86_64
+            toolchain-${{ needs.check.outputs.stable_major }}-x86_64
             toolchain-
 
       - name: Run custom-script-1 & Update feeds
@@ -115,6 +116,31 @@ jobs:
         run: |
           [ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
           ./scripts/feeds update -a && ./scripts/feeds install -a
+
+      - name: Run custom-script-2 (Download official config & append packages)
+        working-directory: /workdir/openwrt
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2" ]; then
+            chmod +x "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
+            "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
+          else
+            echo "Error: $CUSTOM_SCRIPT_2 not found!"
+            exit 1
+          fi
+
+      - name: Build toolchain (if not cached)
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        working-directory: /workdir/openwrt
+        run: |
+          export TERM=linux
+          echo "Toolchain cache miss, building now..."
+          make toolchain/compile -j$(nproc)
+
+      - name: Download packages
+        working-directory: /workdir/openwrt
+        run: |
+          make download -j8
+          find dl -size -1024c -exec rm -f {} \;
 
       - name: Fix base-files version
         working-directory: /workdir/openwrt
@@ -154,75 +180,11 @@ jobs:
           fi
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
-      - name: Add Full Cone NAT patches
-        working-directory: /workdir/openwrt
-        run: |
-          curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
-          sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
-
-      - name: Enforce Full Cone kernel config options
-        working-directory: /workdir/openwrt
-        run: |
-          KERNEL_CONFIG="target/linux/x86/config-6.12"
-          if [ -f "$KERNEL_CONFIG" ]; then
-            grep -q "CONFIG_NFT_FULLCONE=y" "$KERNEL_CONFIG" || {
-              echo "CONFIG_NFT_FULLCONE=y" >> "$KERNEL_CONFIG"
-              echo "CONFIG_NETFILTER_XT_MATCH_FULLCONE=y" >> "$KERNEL_CONFIG"
-              echo "CONFIG_NETFILTER_XT_TARGET_FULLCONE=y" >> "$KERNEL_CONFIG"
-              echo "Manually added Full Cone options to kernel config."
-            }
-          else
-            echo "ERROR: Kernel config file $KERNEL_CONFIG not found!"
-            exit 1
-          fi
-
-      - name: Run custom-script-2 (Download official config & append packages)
-        working-directory: /workdir/openwrt
-        run: |
-          if [ -f "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2" ]; then
-            chmod +x "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
-            "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
-          else
-            echo "Error: $CUSTOM_SCRIPT_2 not found!"
-            exit 1
-          fi
-
-      - name: Build toolchain (if not cached)
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        working-directory: /workdir/openwrt
-        run: |
-          export TERM=linux
-          echo "Toolchain cache miss, building now..."
-          make toolchain/compile -j$(nproc)
-
-      - name: Download packages
-        working-directory: /workdir/openwrt
-        run: |
-          make download -j8
-          find dl -size -1024c -exec rm -f {} \;
-
       - name: Compile the firmware
         working-directory: /workdir/openwrt
         id: compile
         run: |
           set +e
-
-          # 强制确保内核配置包含 Full Cone 选项（双保险）
-          KERNEL_BUILD_DIR="build_dir/target-x86_64_musl/linux-x86_64"
-          if [ -d "$KERNEL_BUILD_DIR" ]; then
-            cd "$KERNEL_BUILD_DIR"
-            if [ -f ".config" ]; then
-              if ! grep -q "CONFIG_NFT_FULLCONE" .config; then
-                echo "CONFIG_NFT_FULLCONE=m" >> .config
-                echo "CONFIG_NETFILTER_XT_MATCH_FULLCONE=m" >> .config
-                echo "CONFIG_NETFILTER_XT_TARGET_FULLCONE=m" >> .config
-                echo "Added Full Cone options to kernel .config"
-                yes "" | make oldconfig
-              fi
-            fi
-            cd /workdir/openwrt
-          fi
-
           THREADS=$(nproc)
           echo "Available cores: $THREADS"
           echo "Attempting parallel build with $THREADS threads"
@@ -233,7 +195,6 @@ jobs:
               make -j1 V=s
             }
           }
-
           BUILD_STATUS=$?
           if [ $BUILD_STATUS -eq 0 ]; then
             echo "status=success" >> $GITHUB_OUTPUT
