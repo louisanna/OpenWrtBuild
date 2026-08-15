@@ -61,8 +61,6 @@ EOF
 
 # 补全依赖并整理 .config
 make defconfig
-# 强制同步内核配置
-make kernel_oldconfig
 
 grep -E "bash|curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance" .config
 
