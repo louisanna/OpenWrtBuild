@@ -106,9 +106,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: openwrt/staging_dir/toolchain-*
-          key: toolchain-${{ needs.check.outputs.stable_major }}-x86_64
+          key: toolchain-${{ needs.check.outputs.repo_branch }}-x86_64
           restore-keys: |
-            toolchain-${{ needs.check.outputs.stable_major }}-x86_64
+            toolchain-${{ needs.check.outputs.repo_branch }}-x86_64
             toolchain-
 
       - name: Run custom-script-1 & Update feeds
