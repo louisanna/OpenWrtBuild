@@ -64,68 +64,85 @@ tune_ethtool() {
     local iface="$1" target=4096
     local max_rx max_tx
 
-    # 使用 awk 精确提取 Pre-set maximums 段中的 RX/TX 最大值
     max_rx=$(ethtool -g "$iface" 2>/dev/null | awk '/Pre-set maximums:/ {f=1; next} /Current hardware settings:/ {f=0} f && /RX:/ {print $NF}')
     max_tx=$(ethtool -g "$iface" 2>/dev/null | awk '/Pre-set maximums:/ {f=1; next} /Current hardware settings:/ {f=0} f && /TX:/ {print $NF}')
 
     [ -n "$max_rx" ] && { ethtool -G "$iface" rx $((max_rx < target ? max_rx : target)) 2>/dev/null || true; }
     [ -n "$max_tx" ] && { ethtool -G "$iface" tx $((max_tx < target ? max_tx : target)) 2>/dev/null || true; }
 
-    # 适度中断合并，降低 2.5G 高速下的 CPU 消耗
     ethtool -c "$iface" 2>/dev/null | grep -q 'rx-usecs' && {
         ethtool -C "$iface" rx-usecs 16 tx-usecs 16 2>/dev/null || true
     }
 }
 
-# 将指定网卡中断绑定到从 start_cpu 开始的连续核心
-bind_irqs_to_cores() {
-    local iface="$1" start_cpu="$2" cpu=$start_cpu
-    for irq in $(get_nic_irqs "$iface"); do
-        if [ -f "/proc/irq/$irq/smp_affinity_list" ]; then
-            write_if_changed "/proc/irq/$irq/smp_affinity_list" "$cpu"
-        elif [ -f "/proc/irq/$irq/smp_affinity" ]; then
-            write_if_changed "/proc/irq/$irq/smp_affinity" "$(printf '%x' $((1 << cpu)))"
-        fi
-        cpu=$(( (cpu + 1) % cores ))
-    done
-}
-
-# 配置网卡 RPS/XPS/RFS，flow_cnt 为每队列条目数
-configure_nic() {
-    local iface="$1" mode="$2" flow_cnt="$3"
-    [ ! -d "/sys/class/net/$iface" ] && return
-
+# ============================================================================
+# 核心优化：统一配置单个网卡的中断亲和性、RPS 和 XPS
+# 参数：
+#   $1 - 网卡名称
+#   $2 - 起始 CPU 编号（用于轮转）
+#   $3 - 是否强制跳过 CPU0 ("yes" / 其他)
+#   $4 - RPS 掩码（可选，若提供则所有队列的 RPS 使用此掩码，否则与中断同核）
+# 说明：
+#   - 每个队列的硬中断、RPS、XPS 会绑定到同一个 CPU（或 RPS 使用指定的多核掩码）
+#   - 当 $3 = "yes" 时，若计算出的目标 CPU 为 0，则顺延到 1（仅当 core 数 > 1）
+#   - 中断号列表按队列顺序对应，若中断号不足则仅配置 RPS/XPS
+# ============================================================================
+bind_nic_full() {
+    local iface="$1" start_cpu="$2" skip_cpu0="$3" rps_mask="$4"
     local q=0
+    local irq_list
+    irq_list=$(get_nic_irqs "$iface")
+    set -- $irq_list
+
     while [ -d "/sys/class/net/$iface/queues/rx-$q" ]; do
-        local cpu_idx=$((q % cores))
-        if [ "$mode" = "wan" ]; then
-            write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_cpus" "$rps_target"
-            write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_flow_cnt" "$flow_cnt"
-            # WAN XPS 避开 CPU0
-            if [ "$cores" -gt 1 ]; then
-                local xps_cpu=$(( cpu_idx % (cores - 1) + 1 ))
-                write_if_changed "/sys/class/net/$iface/queues/tx-$q/xps_cpus" "$(printf '%x' $((1 << xps_cpu)))"
-            else
-                write_if_changed "/sys/class/net/$iface/queues/tx-$q/xps_cpus" "1"
-            fi
-        else
-            local mask
-            mask=$(printf "%x" $((1 << cpu_idx)))
-            write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_cpus" "$mask"
-            write_if_changed "/sys/class/net/$iface/queues/tx-$q/xps_cpus" "$mask"
-            write_if_changed "/sys/class/net/$iface/queues/rx-$q/rps_flow_cnt" "$flow_cnt"
+        # 计算目标 CPU（轮转）
+        local target_cpu=$(( (start_cpu + q) % cores ))
+        # 若需要跳过 CPU0 且当前目标为 0，则顺延到 1（仅当核心数 > 1）
+        if [ "$skip_cpu0" = "yes" ] && [ "$target_cpu" -eq 0 ] && [ "$cores" -gt 1 ]; then
+            target_cpu=1
         fi
+
+        # 获取对应的中断号（若顺序对应不上，则忽略）
+        local irq="$1"
+        shift 2>/dev/null || irq=""
+
+        # ---- 设置中断亲和性 ----
+        if [ -n "$irq" ]; then
+            if [ -f "/proc/irq/$irq/smp_affinity_list" ]; then
+                write_if_changed "/proc/irq/$irq/smp_affinity_list" "$target_cpu"
+            else
+                write_if_changed "/proc/irq/$irq/smp_affinity" "$(printf '%x' $((1 << target_cpu)))"
+            fi
+        fi
+
+        # ---- 设置 RPS ----
+        local rx_dir="/sys/class/net/$iface/queues/rx-$q"
+        [ -d "$rx_dir" ] && {
+            if [ -n "$rps_mask" ]; then
+                # 使用指定的多核掩码（如 WAN 口）
+                write_if_changed "$rx_dir/rps_cpus" "$rps_mask"
+            else
+                # 使用与中断相同的单核掩码
+                write_if_changed "$rx_dir/rps_cpus" "$(printf '%x' $((1 << target_cpu)))"
+            fi
+            write_if_changed "$rx_dir/rps_flow_cnt" "$rfs_queue"
+        }
+
+        # ---- 设置 XPS（始终与中断同核） ----
+        local tx_dir="/sys/class/net/$iface/queues/tx-$q"
+        [ -d "$tx_dir" ] && {
+            write_if_changed "$tx_dir/xps_cpus" "$(printf '%x' $((1 << target_cpu)))"
+        }
+
         q=$((q + 1))
     done
 }
 
 # 自动探测网卡（如果默认名称不存在）
 detect_interfaces() {
-    # 仅当默认网卡不存在时执行
     if [ ! -d "/sys/class/net/$WAN_IF" ] || [ ! -d "/sys/class/net/$LAN_IF" ]; then
         local eth_list
         eth_list=$(ls /sys/class/net | grep -E '^(eth|enp)' | head -2)
-        # 取前两个作为 WAN 和 LAN
         if [ -n "$eth_list" ]; then
             WAN_IF=$(echo "$eth_list" | sed -n '1p')
             LAN_IF=$(echo "$eth_list" | sed -n '2p')
@@ -141,7 +158,7 @@ daemon() {
     detect_interfaces
 
     local wait=0
-    while [ ! -d /sys/class/net/$WAN_IF/queues/rx-0 ] || [ ! -d /sys/class/net/$LAN_IF/queues/rx-0 ]; do
+    while [ ! -d "/sys/class/net/$WAN_IF/queues/rx-0" ] || [ ! -d "/sys/class/net/$LAN_IF/queues/rx-0" ]; do
         sleep 1
         wait=$((wait + 1))
         [ "$wait" -ge 60 ] && exit 1
@@ -157,7 +174,7 @@ daemon() {
     local cores rps_target rfs_global rfs_queue
     cores=$(grep -c ^processor /proc/cpuinfo)
 
-    # RPS target 跳过 CPU0
+    # RPS target 跳过 CPU0（用于 WAN 口的 RPS 多核分散）
     if [ "$cores" -le 1 ]; then
         rps_target=0
     else
@@ -183,7 +200,6 @@ daemon() {
             total_rx_queues=$((total_rx_queues + n))
         fi
     done
-    # 若 pppoe-wan 已存在则计入
     if [ -d /sys/class/net/pppoe-wan/queues/rx-0 ]; then
         local ppp_count=$(ls -d /sys/class/net/pppoe-wan/queues/rx-* 2>/dev/null | wc -l)
         total_rx_queues=$((total_rx_queues + ppp_count))
@@ -210,18 +226,16 @@ daemon() {
     local first_run=1
     local interval=5
     while true; do
-        local wan_start=0
-        local lan_start=0
-        [ "$cores" -gt 2 ] && lan_start=$(( cores / 2 ))
-        [ "$cores" -eq 2 ] && lan_start=1
+        # ======================== 核心配置 ========================
+        # WAN 口：硬中断从 CPU1 轮转，强制跳过 CPU0；
+        #          RPS 使用多核掩码（CPU1-3），以利用多核处理高并发接收
+        bind_nic_full "$WAN_IF" 1 yes "$rps_target"
 
-        bind_irqs_to_cores "$WAN_IF" $wan_start
-        bind_irqs_to_cores "$LAN_IF" $lan_start
+        # LAN 口：硬中断从 CPU0 轮转，不跳过；
+        #          RPS 与中断绑定同一核心，保持缓存局部性
+        bind_nic_full "$LAN_IF" 0 no ""
 
-        configure_nic $WAN_IF wan "$rfs_queue"
-        configure_nic $LAN_IF lan "$rfs_queue"
-
-        # pppoe-wan 多队列支持（如果存在）
+        # pppoe-wan 多队列支持（如果存在，虚拟接口无硬中断，仅设 RPS）
         if [ -d /sys/class/net/pppoe-wan ]; then
             local q=0
             while [ -d "/sys/class/net/pppoe-wan/queues/rx-$q" ]; do
@@ -231,6 +245,7 @@ daemon() {
             done
         fi
 
+        # 确保全局 RFS 条目数
         write_if_changed /proc/sys/net/core/rps_sock_flow_entries "$rfs_global"
 
         if [ "$first_run" -eq 1 ]; then
