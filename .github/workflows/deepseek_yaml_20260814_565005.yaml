@@ -19,6 +19,7 @@ env:
   STORE_FIRMWARE: true
   RELEASE_FIRMWARE: false
   TIME_ZONE: Asia/Shanghai
+  BARK_KEY: ${{ secrets.BARK_KEY }}
 
 jobs:
   check:
@@ -121,6 +122,21 @@ jobs:
             echo "feeds_updated=false" >> $GITHUB_OUTPUT
           fi
 
+  notify-no-update:
+    name: Notify no update
+    runs-on: ubuntu-latest
+    needs: check
+    if: needs.check.outputs.new_version == 'false' && needs.check.outputs.feeds_updated == 'false' && github.event_name == 'schedule'
+    steps:
+      - name: Send Bark Notification - No Update
+        if: env.BARK_KEY != ''
+        run: |
+          TITLE="OpenWRT 无更新"
+          BODY="定时检测完成，未检测到系统版本和Feeds更新。\n版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}"
+          curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
+
   build:
     name: Build firmware
     runs-on: ubuntu-latest
@@ -131,7 +147,6 @@ jobs:
     env:
       STABLE_TAG: ${{ needs.check.outputs.stable_tag }}
       REPO_BRANCH: ${{ needs.check.outputs.repo_branch }}
-      BARK_KEY: ${{ secrets.BARK_KEY }}
 
     steps:
       - name: Checkout
