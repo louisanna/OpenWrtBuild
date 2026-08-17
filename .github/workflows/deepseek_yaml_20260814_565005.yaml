@@ -197,7 +197,6 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           VERSION=${STABLE_TAG#v}
-          echo "Downloading feeds.conf for version $VERSION"
           curl -fsSL "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/feeds.conf" -o feeds.conf
           if [ ! -s feeds.conf ]; then
             echo "Error: feeds.conf download failed or empty"
