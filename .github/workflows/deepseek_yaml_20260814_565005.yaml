@@ -1,4 +1,4 @@
-name: The newest openwrt x86_64 latest
+name: The newest openwrt x86_64 for N5105
 
 on:
   workflow_dispatch:
@@ -8,11 +8,12 @@ on:
         required: true
         default: "true"
   schedule:
-    - cron: '0 19 * * *'   # UTC 19:00，北京时间 3:00
+    - cron: '0 19 * * *'  # 北京时间每天 03:00
 
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
   CONFIG_FILE: example.config
+  #CUSTOM_SCRIPT_1: script1.sh
   CUSTOM_SCRIPT_2: script2.sh
   STORE_PRODUCTS: false
   STORE_FIRMWARE: true
@@ -20,16 +21,121 @@ env:
   TIME_ZONE: Asia/Shanghai
 
 jobs:
-  build:
+  check:
+    name: Get latest stable version and feeds
     runs-on: ubuntu-latest
+    outputs:
+      stable_tag: ${{ steps.get-version.outputs.stable_tag }}
+      repo_branch: ${{ steps.get-version.outputs.repo_branch }}
+      new_version: ${{ steps.set-outputs.outputs.new_version }}
+      feeds_updated: ${{ steps.set-outputs.outputs.feeds_updated }}
+    steps:
+      - name: Get latest stable version
+        id: get-version
+        run: |
+          STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | \
+                            grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | \
+                            cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
+          [ -z "$STABLE_VERSION" ] && echo "Error: Failed to get version" && exit 1
+          echo "Latest stable version: $STABLE_VERSION"
+          echo "stable_tag=v$STABLE_VERSION" >> $GITHUB_OUTPUT
+          echo "repo_branch=openwrt-$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
+          echo "stable_version=$STABLE_VERSION" >> $GITHUB_ENV
+          echo "stable_major=$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
+
+      - name: Get feeds hash
+        id: feeds-hash
+        run: |
+          set -e
+          VERSION="${{ env.stable_version }}"
+          FEEDS_CONF_URL="https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/feeds.conf"
+          curl -fsSL "$FEEDS_CONF_URL" -o feeds.conf.tmp
+
+          : > feeds-hash-input
+          while IFS= read -r line; do
+            [[ "$line" =~ ^#.*$ ]] && continue
+            [ -z "$line" ] && continue
+            method=$(echo "$line" | awk '{print $1}')
+            feed=$(echo "$line" | awk '{print $2}')
+            url_raw=$(echo "$line" | awk '{print $3}')
+            [ -z "$url_raw" ] && continue
+            if [[ "$method" == src-git* ]]; then
+              url="$url_raw"
+              branch=""
+              if [[ "$url" == *";"* ]]; then
+                branch="${url#*;}"
+                url="${url%;*}"
+              fi
+              if [[ "$url" == *"^"* ]]; then
+                url="${url%^*}"
+              fi
+              ref="HEAD"
+              [ -n "$branch" ] && ref="refs/heads/$branch"
+              commit=$(git ls-remote "$url" "$ref" | head -1 | cut -f1)
+              if [ -z "$commit" ]; then
+                echo "Warning: failed to get commit for $feed ($url ref=$ref)" >&2
+                continue
+              fi
+              echo "$feed $commit" >> feeds-hash-input
+            fi
+          done < feeds.conf.tmp
+          if [ ! -s feeds-hash-input ]; then
+            echo "Error: no feeds found or all feed lookups failed" >&2
+            exit 1
+          fi
+          sort feeds-hash-input -o feeds-hash-input
+          FEEDS_HASH=$(sha256sum feeds-hash-input | cut -d' ' -f1)
+          echo "feeds_hash=$FEEDS_HASH" >> $GITHUB_OUTPUT
+          echo "feeds_hash=$FEEDS_HASH" >> $GITHUB_ENV
+
+      - name: Check if new version
+        id: check-cache-version
+        uses: actions/cache@v5
+        with:
+          path: .version-cache
+          key: version-${{ env.stable_version }}
+
+      - name: Check if feeds updated
+        id: check-cache-feeds
+        uses: actions/cache@v5
+        with:
+          path: .feeds-cache
+          key: feeds-${{ env.feeds_hash }}
+
+      - name: Set outputs and save caches
+        id: set-outputs
+        run: |
+          if [ "${{ steps.check-cache-version.outputs.cache-hit }}" != "true" ]; then
+            echo "new_version=true" >> $GITHUB_OUTPUT
+            mkdir -p .version-cache
+            echo "${{ env.stable_version }}" > .version-cache/version
+          else
+            echo "new_version=false" >> $GITHUB_OUTPUT
+          fi
+
+          if [ "${{ steps.check-cache-feeds.outputs.cache-hit }}" != "true" ]; then
+            echo "feeds_updated=true" >> $GITHUB_OUTPUT
+            mkdir -p .feeds-cache
+            echo "${{ env.feeds_hash }}" > .feeds-cache/hash
+          else
+            echo "feeds_updated=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+    needs: check
+    if: (needs.check.outputs.new_version == 'true') || (needs.check.outputs.feeds_updated == 'true') || (github.event.inputs.force-build == 'true')
     permissions:
       contents: write
     env:
+      STABLE_TAG: ${{ needs.check.outputs.stable_tag }}
+      REPO_BRANCH: ${{ needs.check.outputs.repo_branch }}
       BARK_KEY: ${{ secrets.BARK_KEY }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
 
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
@@ -40,141 +146,72 @@ jobs:
           haskell: true
           large-packages: true
           docker-images: true
+          swap-storage: false
 
-      # ---------- 检测系统版本更新 ----------
-      - name: Get latest stable version
-        id: version
-        run: |
-          STABLE_VERSION=$(curl -s https://downloads.openwrt.org/releases/ | \
-            grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' | \
-            cut -d'"' -f2 | tr -d '/' | sort -Vu | tail -n1)
-          [ -z "$STABLE_VERSION" ] && exit 1
-          echo "stable_version=$STABLE_VERSION" >> $GITHUB_OUTPUT
-          echo "stable_tag=v$STABLE_VERSION" >> $GITHUB_OUTPUT
-          echo "repo_branch=openwrt-$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
-
-      - name: Check version cache
-        id: version-cache
-        uses: actions/cache@v4
-        with:
-          path: .version-cache
-          key: version-${{ steps.version.outputs.stable_version }}
-
-      - name: Determine version update
-        id: version-status
-        run: |
-          if [ "${{ steps.version-cache.outputs.cache-hit }}" == "true" ]; then
-            echo "updated=false" >> $GITHUB_OUTPUT
-          else
-            echo "updated=true" >> $GITHUB_OUTPUT
-            mkdir -p .version-cache
-            echo "${{ steps.version.outputs.stable_version }}" > .version-cache/version
-          fi
-
-      # ---------- 检测 feeds 更新 ----------
-      - name: Clone source code
-        run: |
-          git clone --depth 1 --branch "${{ steps.version.outputs.stable_tag }}" --single-branch "$REPO_URL" openwrt
-          cp -r files openwrt/ || true
-
-      - name: Update feeds
-        working-directory: openwrt
-        run: |
-          VERSION="${{ steps.version.outputs.stable_version }}"
-          curl -fsSL "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/feeds.conf" -o feeds.conf
-          if [ ! -s feeds.conf ]; then
-            echo "Error: feeds.conf download failed or empty"
-            exit 1
-          fi
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: Compute feeds hash
-        id: feeds-hash
-        working-directory: openwrt
-        run: |
-          FEEDS_HASH=$(for d in feeds/*/.git; do
-            git -C "$(dirname "$d")" rev-parse HEAD 2>/dev/null || true
-          done | sort | sha256sum | cut -d' ' -f1)
-          echo "hash=$FEEDS_HASH" >> $GITHUB_OUTPUT
-          echo "key=feeds-$FEEDS_HASH" >> $GITHUB_OUTPUT
-
-      - name: Check feeds cache
-        id: feeds-cache
-        uses: actions/cache@v4
-        with:
-          path: .feeds-cache
-          key: ${{ steps.feeds-hash.outputs.key }}
-
-      - name: Determine feeds update
-        id: feeds-status
-        run: |
-          if [ "${{ steps.feeds-cache.outputs.cache-hit }}" == "true" ]; then
-            echo "updated=false" >> $GITHUB_OUTPUT
-          else
-            echo "updated=true" >> $GITHUB_OUTPUT
-            mkdir -p .feeds-cache
-            echo "${{ steps.feeds-hash.outputs.hash }}" > .feeds-cache/hash
-          fi
-
-      # ---------- 决定是否构建 ----------
-      - name: Decide whether to build
-        id: should-build
-        run: |
-          FORCE_BUILD="${{ github.event.inputs.force-build }}"
-          VERSION_UPDATED="${{ steps.version-status.outputs.updated }}"
-          FEEDS_UPDATED="${{ steps.feeds-status.outputs.updated }}"
-          if [ "$FORCE_BUILD" == "true" ] || [ "$VERSION_UPDATED" == "true" ] || [ "$FEEDS_UPDATED" == "true" ]; then
-            echo "build=true" >> $GITHUB_OUTPUT
-          else
-            echo "build=false" >> $GITHUB_OUTPUT
-          fi
-
-      # 无更新时发送通知（可选）
-      - name: Send skip notification
-        if: steps.should-build.outputs.build == 'false' && env.BARK_KEY != ''
-        run: |
-          curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{"title": "OpenWRT 无更新", "body": "系统版本和 feeds 均无更新，跳过编译", "group": "OpenWRT 编译"}' || true
-
-      # ---------- 以下步骤仅在 should-build.build == 'true' 时执行 ----------
-      - name: Install dependencies
-        if: steps.should-build.outputs.build == 'true'
+      - name: Initialization environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           echo "FILE_DATE=_$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
           echo "DEVICE_NAME=_N5105" >> $GITHUB_ENV
-          
+
           sudo apt-get -qq update
           sudo apt-get -qq install binutils bison build-essential bzip2 cmake cpio curl flex gawk git gperf haveged libelf-dev libssl-dev libtool ninja-build p7zip p7zip-full patch pkgconf python3 python3-setuptools qemu-utils rsync squashfs-tools subversion unzip vim wget xxd zlib1g-dev aria2 autoconf automake autopoint device-tree-compiler gettext libncurses5-dev libncursesw5-dev libreadline-dev libpython3-dev libfuse-dev libglib2.0-dev libmpc-dev libmpfr-dev libgmp3-dev libltdl-dev intltool help2man mkisofs msmtp lrzsz scons texinfo clang file gcc-multilib g++-multilib
           sudo apt-get -qq autoremove --purge && sudo apt-get -qq clean
           sudo timedatectl set-timezone $TIME_ZONE
           sudo mkdir -p /workdir/ && sudo chown $USER:$USER /workdir/
-          
+
+      - name: Clone source code
+        working-directory: /workdir
+        run: |
+          git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt
+          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+          cp -r $GITHUB_WORKSPACE/files /workdir/openwrt/ || true
+
       - name: Cache toolchain
         id: cache-toolchain
-        if: steps.should-build.outputs.build == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: openwrt/staging_dir/toolchain-*
-          key: toolchain-${{ steps.version.outputs.repo_branch }}-x86_64
+          key: toolchain-${{ needs.check.outputs.repo_branch }}-x86_64
           restore-keys: |
-            toolchain-${{ steps.version.outputs.repo_branch }}-x86_64
+            toolchain-${{ needs.check.outputs.repo_branch }}-x86_64
             toolchain-
 
+      - name: Run custom-script-1 & Update feeds
+        working-directory: /workdir/openwrt
+        run: |
+          VERSION=${STABLE_TAG#v}
+          echo "Downloading feeds.conf for version $VERSION"
+          curl -fsSL "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/feeds.conf" -o feeds.conf
+          if [ ! -s feeds.conf ]; then
+            echo "Error: feeds.conf download failed or empty"
+            exit 1
+          fi
+          #[ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
+          ./scripts/feeds update -a && ./scripts/feeds install -a
+
+      - name: Run custom-script-2 (Download official config & append packages)
+        working-directory: /workdir/openwrt
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2" ]; then
+            chmod +x "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
+            "$GITHUB_WORKSPACE/$CUSTOM_SCRIPT_2"
+          else
+            echo "Error: $CUSTOM_SCRIPT_2 not found!"
+            exit 1
+          fi
+
       - name: Build toolchain (if not cached)
-        if: steps.should-build.outputs.build == 'true' && steps.cache-toolchain.outputs.cache-hit != 'true'
-        working-directory: openwrt
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        working-directory: /workdir/openwrt
         run: |
           export TERM=linux
           echo "Toolchain cache miss, building now..."
           make toolchain/compile -j$(nproc)
 
       - name: Download packages
-        if: steps.should-build.outputs.build == 'true'
-        working-directory: openwrt
+        working-directory: /workdir/openwrt
         run: |
           make download -j8
           find dl -size -1024c -exec rm -f {} \;
@@ -224,71 +261,133 @@ jobs:
           #sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
           yes "" | make oldconfig V=s
 
-
-      - name: Compile firmware
+      - name: Compile the firmware
+        working-directory: /workdir/openwrt
         id: compile
-        if: steps.should-build.outputs.build == 'true'
-        working-directory: openwrt
         run: |
-          if make -j$(nproc) V=s; then
+          set +e
+          THREADS=$(nproc)
+          echo "Available cores: $THREADS"
+          echo "Attempting parallel build with $THREADS threads"
+          make -j$THREADS || {
+            echo "Parallel build failed, falling back to single thread"
+            make -j1 || {
+              echo "Single thread failed, trying with verbose output"
+              make -j1 V=s
+            }
+          }
+          BUILD_STATUS=$?
+          if [ $BUILD_STATUS -eq 0 ]; then
             echo "status=success" >> $GITHUB_OUTPUT
           else
             echo "status=failure" >> $GITHUB_OUTPUT
-            exit 1
           fi
+          exit $BUILD_STATUS
 
-      - name: Organize firmware files
-        if: steps.should-build.outputs.build == 'true' && steps.compile.outputs.status == 'success'
-        working-directory: openwrt
+      - name: Organize firmware-related files
+        working-directory: /workdir/openwrt
+        id: organize-files
+        if: steps.compile.outputs.status == 'success'
         run: |
           cd bin/targets/*/*
           rm -rf packages *.swap swapfile *.log
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
-      - name: Upload firmware artifact
-        if: steps.should-build.outputs.build == 'true' && steps.compile.outputs.status == 'success' && env.STORE_FIRMWARE == 'true'
-        uses: actions/upload-artifact@v4
+      - name: Upload firmware directory
+        uses: actions/upload-artifact@v5
+        if: env.STORE_FIRMWARE == 'true' && steps.compile.outputs.status == 'success'
         with:
           name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
           path: ${{ env.FIRMWARE }}
 
-      - name: Generate release
-        if: steps.should-build.outputs.build == 'true' && steps.compile.outputs.status == 'success' && env.RELEASE_FIRMWARE == 'true'
+      - name: Generate release tag & Upload
+        if: env.RELEASE_FIRMWARE == 'true' && steps.compile.outputs.status == 'success'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.FILE_DATE }}
+          body: |
+            # Build Info
+            - Source: ${{ env.REPO_URL }} tag:${{ env.STABLE_TAG }}
           files: ${{ env.FIRMWARE }}/*
 
-      # ---------- Bark 通知 ----------
-      - name: Send Bark notification
-        if: always() && steps.should-build.outputs.build == 'true' && env.BARK_KEY != ''
+      - name: Collect build info
+        id: build-info
+        if: always()
         run: |
-          # 缓存状态
-          if [ "${{ steps.cache-toolchain.outputs.cache-hit }}" == "true" ]; then
+          NEW_VERSION="${{ needs.check.outputs.new_version }}"
+          FEEDS_UPDATED="${{ needs.check.outputs.feeds_updated }}"
+
+          if [ "$NEW_VERSION" == "true" ] && [ "$FEEDS_UPDATED" == "true" ]; then
+            VERSION_STATUS="检测到系统版本和Feeds更新"
+          elif [ "$FEEDS_UPDATED" == "true" ]; then
+            VERSION_STATUS="检测到Feeds更新"
+          elif [ "$NEW_VERSION" == "true" ]; then
+            VERSION_STATUS="检测到系统版本更新"
+          else
+            VERSION_STATUS="手动触发（未检测到更新）"
+          fi
+
+          CACHE_HIT="${{ steps.cache-toolchain.outputs.cache-hit }}"
+          if [ "$CACHE_HIT" == "true" ]; then
             CACHE_STATUS="复用缓存"
           else
             CACHE_STATUS="新建缓存"
           fi
-          # feeds 更新状态
-          if [ "${{ steps.feeds-status.outputs.updated }}" == "true" ]; then
-            FEEDS_STATUS="有更新"
+
+          CACHE_DIR="/workdir/openwrt/staging_dir/toolchain-*"
+          if ls $CACHE_DIR 1> /dev/null 2>&1; then
+            CACHE_SIZE=$(du -sh $CACHE_DIR 2>/dev/null | cut -f1 | head -1)
           else
-            FEEDS_STATUS="无更新"
-          fi
-          # 版本更新状态
-          if [ "${{ steps.version-status.outputs.updated }}" == "true" ]; then
-            VERSION_STATUS="有更新"
-          else
-            VERSION_STATUS="无更新"
+            CACHE_SIZE="无"
           fi
 
+          echo "version_status=$VERSION_STATUS" >> $GITHUB_OUTPUT
+          echo "cache_status=$CACHE_STATUS" >> $GITHUB_OUTPUT
+          echo "cache_size=$CACHE_SIZE" >> $GITHUB_OUTPUT
+
+      - name: Send Bark Notification (POST)
+        if: always() && env.BARK_KEY != ''
+        run: |
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
             TITLE="OpenWRT 编译完成"
-            BODY="版本: ${{ steps.version.outputs.stable_tag }}\n分支: ${{ steps.version.outputs.repo_branch }}\n版本状态: $VERSION_STATUS\nFeeds状态: $FEEDS_STATUS\nToolchain缓存: $CACHE_STATUS"
+            BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH\n触发: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }} (${{ steps.build-info.outputs.cache_size }})"
           else
             TITLE="OpenWRT 编译失败"
-            BODY="编译失败，请检查日志。\n版本状态: $VERSION_STATUS\nFeeds状态: $FEEDS_STATUS\nToolchain缓存: $CACHE_STATUS"
+            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n触发: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }}"
           fi
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
+
+  clean:
+    name: Clean up old assets
+    runs-on: ubuntu-latest
+    needs: build
+    if: always()
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@main
+        with:
+          retain_days: 1
+          keep_minimum_runs: 1
+
+      - name: Remove old Releases
+        if: env.RELEASE_FIRMWARE == 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const repo = context.repo;
+            const { data: releases } = await github.rest.repos.listReleases({
+              owner: repo.owner, repo: repo.repo, per_page: 100
+            });
+            const valid = releases.filter(r => !r.draft && !r.prerelease)
+              .sort((a,b) => new Date(b.published_at) - new Date(a.published_at));
+            const delList = valid.slice(3);
+            for (const r of delList) {
+              await github.rest.repos.deleteRelease({owner:repo.owner,repo:repo.repo,release_id:r.id});
+              await github.rest.git.deleteRef({owner:repo.owner,repo:repo.repo,ref:`tags/${r.tag_name}`});
+              console.log(`Removed: ${r.tag_name}`);
+            }
