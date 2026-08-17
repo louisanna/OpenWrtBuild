@@ -11,7 +11,7 @@ on:
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
   CONFIG_FILE: example.config
-  CUSTOM_SCRIPT_1: script1.sh
+  #CUSTOM_SCRIPT_1: script1.sh
   CUSTOM_SCRIPT_2: script2.sh
   STORE_PRODUCTS: false
   STORE_FIRMWARE: true
@@ -114,7 +114,14 @@ jobs:
       - name: Run custom-script-1 & Update feeds
         working-directory: /workdir/openwrt
         run: |
-          [ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
+          VERSION=${STABLE_TAG#v}
+          echo "Downloading feeds.conf for version $VERSION"
+          curl -fsSL "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/feeds.conf" -o feeds.conf
+          if [ ! -s feeds.conf ]; then
+            echo "Error: feeds.conf download failed or empty"
+            exit 1
+          fi
+          #[ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
           ./scripts/feeds update -a && ./scripts/feeds install -a
 
       - name: Run custom-script-2 (Download official config & append packages)
@@ -236,15 +243,47 @@ jobs:
             - Source: ${{ env.REPO_URL }} tag:${{ env.STABLE_TAG }}
           files: ${{ env.FIRMWARE }}/*
 
+      - name: Collect build info
+        id: build-info
+        if: always()
+        run: |
+          # 判断是否因新版本触发
+          NEW_VERSION="${{ needs.check.outputs.new_version }}"
+          if [ "$NEW_VERSION" == "true" ]; then
+            VERSION_STATUS="检测到新版本"
+          else
+            VERSION_STATUS="手动触发（未检测到新版本）"
+          fi
+
+          # 判断 toolchain 缓存状态
+          CACHE_HIT="${{ steps.cache-toolchain.outputs.cache-hit }}"
+          if [ "$CACHE_HIT" == "true" ]; then
+            CACHE_STATUS="复用缓存"
+          else
+            CACHE_STATUS="新建缓存"
+          fi
+
+          # 计算缓存目录大小（如果存在）
+          CACHE_DIR="/workdir/openwrt/staging_dir/toolchain-*"
+          if ls $CACHE_DIR 1> /dev/null 2>&1; then
+            CACHE_SIZE=$(du -sh $CACHE_DIR 2>/dev/null | cut -f1 | head -1)
+          else
+            CACHE_SIZE="无"
+          fi
+
+          echo "version_status=$VERSION_STATUS" >> $GITHUB_OUTPUT
+          echo "cache_status=$CACHE_STATUS" >> $GITHUB_OUTPUT
+          echo "cache_size=$CACHE_SIZE" >> $GITHUB_OUTPUT
+
       - name: Send Bark Notification (POST)
         if: always() && env.BARK_KEY != ''
         run: |
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
             TITLE="OpenWRT 编译完成"
-            BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH"
+            BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH\n触发: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }} (${{ steps.build-info.outputs.cache_size }})"
           else
             TITLE="OpenWRT 编译失败"
-            BODY="编译过程出现问题，请检查 GitHub Actions 日志。"
+            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n触发: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }}"
           fi
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
