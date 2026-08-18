@@ -271,8 +271,10 @@ jobs:
       - name: Add Full Cone NAT patches
         working-directory: /workdir/openwrt
         run: |
-          curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
+          #curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
           #sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
+          curl -sSL https://raw.githubusercontent.com/mufeng05/turboacc/main/add_turboacc.sh -o add_turboacc.sh && bash add_turboacc.sh
+          echo 'CONFIG_PACKAGE_luci-app-turboacc=y' >> .config
           yes "" | make oldconfig V=s
 
       - name: Compile the firmware
