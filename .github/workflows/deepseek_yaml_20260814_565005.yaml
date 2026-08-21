@@ -96,14 +96,34 @@ jobs:
           path: .version-cache
           key: version-${{ env.stable_version }}
 
-      - name: Check if feeds updated
-        id: check-cache-feeds
+      - name: Restore feeds cache
+        id: feeds-cache
         uses: actions/cache@v5
         with:
           path: .feeds-cache
           key: feeds-${{ env.feeds_hash }}
+          restore-keys: |
+            feeds-
 
-      - name: Set outputs and save caches
+      - name: Compare feeds hash
+        id: compare-feeds
+        run: |
+          CURRENT_HASH="${{ env.feeds_hash }}"
+          CACHE_FILE=".feeds-cache/hash"
+          if [ -f "$CACHE_FILE" ]; then
+            CACHED_HASH=$(cat "$CACHE_FILE" | tr -d '[:space:]')
+            if [ "$CACHED_HASH" == "$CURRENT_HASH" ]; then
+              echo "feeds_updated=false" >> $GITHUB_OUTPUT
+            else
+              echo "feeds_updated=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "feeds_updated=true" >> $GITHUB_OUTPUT
+          fi
+          mkdir -p .feeds-cache
+          echo "$CURRENT_HASH" > .feeds-cache/hash
+
+      - name: Set outputs
         id: set-outputs
         run: |
           if [ "${{ steps.check-cache-version.outputs.cache-hit }}" != "true" ]; then
@@ -114,13 +134,7 @@ jobs:
             echo "new_version=false" >> $GITHUB_OUTPUT
           fi
 
-          if [ "${{ steps.check-cache-feeds.outputs.cache-hit }}" != "true" ]; then
-            echo "feeds_updated=true" >> $GITHUB_OUTPUT
-            mkdir -p .feeds-cache
-            echo "${{ env.feeds_hash }}" > .feeds-cache/hash
-          else
-            echo "feeds_updated=false" >> $GITHUB_OUTPUT
-          fi
+          echo "feeds_updated=${{ steps.compare-feeds.outputs.feeds_updated }}" >> $GITHUB_OUTPUT
 
   notify-no-update:
     name: Notify no update
@@ -197,6 +211,7 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           VERSION=${STABLE_TAG#v}
+          echo "Downloading feeds.conf for version $VERSION"
           curl -fsSL "https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/feeds.conf" -o feeds.conf
           if [ ! -s feeds.conf ]; then
             echo "Error: feeds.conf download failed or empty"
@@ -272,9 +287,7 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           #curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
-          #curl -sSL https://raw.githubusercontent.com/mufeng05/turboacc/main/add_turboacc.sh -o add_turboacc.sh && bash add_turboacc.sh
           #sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
-          #echo 'CONFIG_PACKAGE_luci-app-turboacc=y' >> .config
           #yes "" | make oldconfig V=s
 
       - name: Compile the firmware
