@@ -23,13 +23,12 @@ env:
 
 jobs:
   check:
-    name: Get latest stable version and feeds
+    name: Check latest stable version
     runs-on: ubuntu-latest
     outputs:
       stable_tag: ${{ steps.get-version.outputs.stable_tag }}
       repo_branch: ${{ steps.get-version.outputs.repo_branch }}
       new_version: ${{ steps.set-outputs.outputs.new_version }}
-      feeds_updated: ${{ steps.set-outputs.outputs.feeds_updated }}
     steps:
       - name: Get latest stable version
         id: get-version
@@ -42,86 +41,13 @@ jobs:
           echo "stable_tag=v$STABLE_VERSION" >> $GITHUB_OUTPUT
           echo "repo_branch=openwrt-$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
           echo "stable_version=$STABLE_VERSION" >> $GITHUB_ENV
-          echo "stable_major=$(echo "$STABLE_VERSION" | cut -d '.' -f1,2)" >> $GITHUB_OUTPUT
 
-      - name: Get feeds hash
-        id: feeds-hash
-        run: |
-          set -e
-          VERSION="${{ env.stable_version }}"
-          FEEDS_CONF_URL="https://downloads.openwrt.org/releases/$VERSION/packages/x86_64/feeds.conf"
-          curl -fsSL "$FEEDS_CONF_URL" -o feeds.conf.tmp
-
-          : > feeds-hash-input
-          while IFS= read -r line; do
-            [[ "$line" =~ ^#.*$ ]] && continue
-            [ -z "$line" ] && continue
-            method=$(echo "$line" | awk '{print $1}')
-            feed=$(echo "$line" | awk '{print $2}')
-            url_raw=$(echo "$line" | awk '{print $3}')
-            [ -z "$url_raw" ] && continue
-            if [[ "$method" == src-git* ]]; then
-              url="$url_raw"
-              branch=""
-              if [[ "$url" == *";"* ]]; then
-                branch="${url#*;}"
-                url="${url%;*}"
-              fi
-              if [[ "$url" == *"^"* ]]; then
-                url="${url%^*}"
-              fi
-              ref="HEAD"
-              [ -n "$branch" ] && ref="refs/heads/$branch"
-              commit=$(git ls-remote "$url" "$ref" | head -1 | cut -f1)
-              if [ -z "$commit" ]; then
-                echo "Warning: failed to get commit for $feed ($url ref=$ref)" >&2
-                continue
-              fi
-              echo "$feed $commit" >> feeds-hash-input
-            fi
-          done < feeds.conf.tmp
-          if [ ! -s feeds-hash-input ]; then
-            echo "Error: no feeds found or all feed lookups failed" >&2
-            exit 1
-          fi
-          sort feeds-hash-input -o feeds-hash-input
-          FEEDS_HASH=$(sha256sum feeds-hash-input | cut -d' ' -f1)
-          echo "feeds_hash=$FEEDS_HASH" >> $GITHUB_OUTPUT
-          echo "feeds_hash=$FEEDS_HASH" >> $GITHUB_ENV
-
-      - name: Check if new version
+      - name: Check if new version (cache)
         id: check-cache-version
         uses: actions/cache@v5
         with:
           path: .version-cache
           key: version-${{ env.stable_version }}
-
-      - name: Restore feeds cache
-        id: feeds-cache
-        uses: actions/cache@v5
-        with:
-          path: .feeds-cache
-          key: feeds-${{ env.feeds_hash }}
-          restore-keys: |
-            feeds-
-
-      - name: Compare feeds hash
-        id: compare-feeds
-        run: |
-          CURRENT_HASH="${{ env.feeds_hash }}"
-          CACHE_FILE=".feeds-cache/hash"
-          if [ -f "$CACHE_FILE" ]; then
-            CACHED_HASH=$(cat "$CACHE_FILE" | tr -d '[:space:]')
-            if [ "$CACHED_HASH" == "$CURRENT_HASH" ]; then
-              echo "feeds_updated=false" >> $GITHUB_OUTPUT
-            else
-              echo "feeds_updated=true" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "feeds_updated=true" >> $GITHUB_OUTPUT
-          fi
-          mkdir -p .feeds-cache
-          echo "$CURRENT_HASH" > .feeds-cache/hash
 
       - name: Set outputs
         id: set-outputs
@@ -134,19 +60,18 @@ jobs:
             echo "new_version=false" >> $GITHUB_OUTPUT
           fi
 
-          echo "feeds_updated=${{ steps.compare-feeds.outputs.feeds_updated }}" >> $GITHUB_OUTPUT
-
   notify-no-update:
     name: Notify no update
     runs-on: ubuntu-latest
     needs: check
-    if: needs.check.outputs.new_version == 'false' && needs.check.outputs.feeds_updated == 'false' && github.event_name == 'schedule'
+    # 仅当定时任务且无新版本时通知（feeds检测已移除）
+    if: needs.check.outputs.new_version == 'false' && github.event_name == 'schedule'
     steps:
       - name: Send Bark Notification - No Update
         if: env.BARK_KEY != ''
         run: |
-          TITLE="OpenWRT 无更新"
-          BODY="定时检测完成，未检测到系统版本和Feeds更新。\n版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}"
+          TITLE="OpenWRT 无更新（定时检测）"
+          BODY="当前最新版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}\n触发方式: 定时任务"
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
@@ -155,7 +80,8 @@ jobs:
     name: Build firmware
     runs-on: ubuntu-latest
     needs: check
-    if: (needs.check.outputs.new_version == 'true') || (needs.check.outputs.feeds_updated == 'true') || (github.event.inputs.force-build == 'true')
+    # 仅当有新版本或手动强制构建时触发
+    if: (needs.check.outputs.new_version == 'true') || (github.event.inputs.force-build == 'true')
     permissions:
       contents: write
     env:
@@ -207,7 +133,7 @@ jobs:
             toolchain-${{ needs.check.outputs.repo_branch }}-x86_64
             toolchain-
 
-      - name: Run custom-script-1 & Update feeds
+      - name: Update feeds (always needed for build)
         working-directory: /workdir/openwrt
         run: |
           VERSION=${STABLE_TAG#v}
@@ -217,6 +143,7 @@ jobs:
             echo "Error: feeds.conf download failed or empty"
             exit 1
           fi
+          # 自定义脚本1（已注释）
           #[ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
           ./scripts/feeds update -a && ./scripts/feeds install -a
 
@@ -283,7 +210,7 @@ jobs:
           fi
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
-      - name: Add Full Cone NAT patches
+      - name: Add Full Cone NAT patches (optional, commented)
         working-directory: /workdir/openwrt
         run: |
           #curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
@@ -343,17 +270,20 @@ jobs:
         id: build-info
         if: always()
         run: |
-          NEW_VERSION="${{ needs.check.outputs.new_version }}"
-          FEEDS_UPDATED="${{ needs.check.outputs.feeds_updated }}"
+          # 判断触发方式
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            TRIGGER="定时任务"
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TRIGGER="手动触发"
+          else
+            TRIGGER="${{ github.event_name }}"
+          fi
 
-          if [ "$NEW_VERSION" == "true" ] && [ "$FEEDS_UPDATED" == "true" ]; then
-            VERSION_STATUS="检测到系统版本和Feeds更新"
-          elif [ "$FEEDS_UPDATED" == "true" ]; then
-            VERSION_STATUS="检测到Feeds更新"
-          elif [ "$NEW_VERSION" == "true" ]; then
+          # 版本更新状态
+          if [ "${{ needs.check.outputs.new_version }}" == "true" ]; then
             VERSION_STATUS="检测到系统版本更新"
           else
-            VERSION_STATUS="手动触发（未检测到更新）"
+            VERSION_STATUS="手动强制构建（无版本更新）"
           fi
 
           CACHE_HIT="${{ steps.cache-toolchain.outputs.cache-hit }}"
@@ -370,6 +300,7 @@ jobs:
             CACHE_SIZE="无"
           fi
 
+          echo "trigger=$TRIGGER" >> $GITHUB_OUTPUT
           echo "version_status=$VERSION_STATUS" >> $GITHUB_OUTPUT
           echo "cache_status=$CACHE_STATUS" >> $GITHUB_OUTPUT
           echo "cache_size=$CACHE_SIZE" >> $GITHUB_OUTPUT
@@ -379,10 +310,10 @@ jobs:
         run: |
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
             TITLE="OpenWRT 编译完成"
-            BODY="新版本已编译成功。\n版本: $STABLE_TAG\n分支: $REPO_BRANCH\n触发: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }} (${{ steps.build-info.outputs.cache_size }})"
+            BODY="版本: $STABLE_TAG\n分支: $REPO_BRANCH\n触发方式: ${{ steps.build-info.outputs.trigger }}\n状态: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }} (${{ steps.build-info.outputs.cache_size }})"
           else
             TITLE="OpenWRT 编译失败"
-            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n触发: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }}"
+            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n触发方式: ${{ steps.build-info.outputs.trigger }}\n状态: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }}"
           fi
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
