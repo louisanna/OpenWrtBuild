@@ -57,12 +57,16 @@ CONFIG_PACKAGE_block-mount=y
 CONFIG_PACKAGE_luci-app-upnp=y
 CONFIG_PACKAGE_miniupnpd-nftables=y
 CONFIG_PACKAGE_luci-app-irqbalance=y
+
+#添加中文包
+CONFIG_LUCI_LANG_zh_Hans=y
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
 EOF
 
 # 补全依赖并整理 .config
 make defconfig
 
-grep -E "bash|curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance" .config
+grep -E "bash|curl|ethtool|miniupnpd|irqbalance|block-mount|luci-app-upnp|luci-app-irqbalance|zh-cn" .config
 
 # 查找并只给以 #! 开头的文件加执行权限
 find files/etc/init.d files/etc/hotplug.d files/etc/ppp -type f 2>/dev/null | \
