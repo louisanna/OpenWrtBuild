@@ -285,6 +285,20 @@ jobs:
           ./build/i18n-add-language.sh zh_Hans
           cd ../..
           yes "" | make oldconfig
+              # 检查 bandix-plus 的 zh_Hans 目录是否存在
+          if [ ! -d "feeds/luci/applications/luci-app-bandix-plus/po/zh_Hans" ]; then
+            echo "错误: bandix-plus 的 zh_Hans 翻译目录不存在，无法生成中文语言包。编译终止。"
+            exit 1
+          else
+            echo "bandix-plus 的 zh_Hans 翻译目录已存在"
+          fi
+
+          # 可选：检查是否生成了 .po 文件
+          if [ -f "feeds/luci/applications/luci-app-bandix-plus/po/zh_Hans/bandix-plus.po" ]; then
+            echo "bandix-plus 中文翻译文件已生成"
+          else
+            echo "警告: bandix-plus.po 文件不存在，但目录存在，可能后续会生成。继续编译。"
+          fi
 
       - name: Compile the firmware
         working-directory: /workdir/openwrt
