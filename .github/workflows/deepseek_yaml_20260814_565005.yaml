@@ -210,12 +210,12 @@ jobs:
           fi
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
-      - name: Add Full Cone NAT patches (optional, commented)
+      - name: Integrate luci-app-bandix
         working-directory: /workdir/openwrt
         run: |
-          #curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
-          #sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
-          #yes "" | make oldconfig V=s
+          git clone --depth=1 https://github.com/timsaya/luci-app-bandix.git package/luci-app-bandix
+          echo "CONFIG_PACKAGE_luci-app-bandix=y" >> .config
+          yes "" | make oldconfig V=s
 
       - name: Compile the firmware
         working-directory: /workdir/openwrt
