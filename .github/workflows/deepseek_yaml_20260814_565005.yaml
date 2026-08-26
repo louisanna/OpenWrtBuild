@@ -213,8 +213,16 @@ jobs:
       - name: Integrate luci-app-bandix
         working-directory: /workdir/openwrt
         run: |
-          git clone --depth=1 https://github.com/timsaya/luci-app-bandix.git package/luci-app-bandix
-          echo "CONFIG_PACKAGE_luci-app-bandix=y" >> .config
+        #客隆源码
+          git clone --depth=1 https://github.com/timsaya/luci-app-bandix-plus.git /tmp/luci-app-bandix-plus
+          cp -r /tmp/luci-app-bandix-plus/luci-app-bandix-plus package/
+          git clone --depth=1 https://github.com/timsaya/openwrt-bandix-plus.git /tmp/openwrt-bandix-plus
+          cp -r /tmp/openwrt-bandix-plus/openwrt-bandix-plus package/bandix-plus
+          rm -rf /tmp/luci-app-bandix-plus /tmp/openwrt-bandix-plus
+          #在 .config 中启用这两个包
+          echo "CONFIG_PACKAGE_bandix-plus=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-bandix-plus=y" >> .config
+          #更新配置
           yes "" | make oldconfig V=s
 
       - name: Compile the firmware
