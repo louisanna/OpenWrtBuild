@@ -215,6 +215,7 @@ jobs:
       - name: Fix base-files version
         working-directory: /workdir/openwrt
         run: |
+          #Fix base-files version
           set -e
           VERSION=${STABLE_TAG#v}
           echo "Detected OpenWrt version: $VERSION"
@@ -253,6 +254,7 @@ jobs:
       - name: Integrate luci-app-bandix-plus
         working-directory: /workdir/openwrt
         run: |
+          #Integrate luci-app-bandix-plus
           # 清理可能存在的旧目录
           rm -rf package/luci-app-bandix-plus package/bandix-plus
 
@@ -274,6 +276,13 @@ jobs:
 
           # 更新配置
           yes "" | make oldconfig
+
+      - name: Add Chinese translations
+        working-directory: /workdir/openwrt
+        run: |
+          cd feeds/luci
+          ./build/i18n-add-language.sh zh_Hans
+          cd ../..
 
       - name: Compile the firmware
         working-directory: /workdir/openwrt
