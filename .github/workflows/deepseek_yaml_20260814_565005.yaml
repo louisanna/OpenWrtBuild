@@ -270,9 +270,7 @@ jobs:
           # 在 .config 中启用这两个包
           echo "CONFIG_PACKAGE_bandix-plus=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-bandix-plus=y" >> .config
-
-          # （可选）移除硬件加速冲突选项
-          sed -i '/CONFIG_PACKAGE_luci-app-turboacc/d' .config
+          echo "CONFIG_PACKAGE_luci-i18n-bandix-plus-zh-cn=y" >> .config
 
           # 更新配置
           yes "" | make oldconfig
