@@ -23,12 +23,13 @@ env:
 
 jobs:
   check:
-    name: Check latest stable version
+    name: Check latest stable version & plugin update
     runs-on: ubuntu-latest
     outputs:
       stable_tag: ${{ steps.get-version.outputs.stable_tag }}
       repo_branch: ${{ steps.get-version.outputs.repo_branch }}
       new_version: ${{ steps.set-outputs.outputs.new_version }}
+      plugin_updated: ${{ steps.plugin-check.outputs.plugin_updated }}   # 新增输出
     steps:
       - name: Get latest stable version
         id: get-version
@@ -49,7 +50,7 @@ jobs:
           path: .version-cache
           key: version-${{ env.stable_version }}
 
-      - name: Set outputs
+      - name: Set outputs (system version)
         id: set-outputs
         run: |
           if [ "${{ steps.check-cache-version.outputs.cache-hit }}" != "true" ]; then
@@ -60,18 +61,54 @@ jobs:
             echo "new_version=false" >> $GITHUB_OUTPUT
           fi
 
+      # --- 新增：插件更新检测 ---
+      - name: Cache bandix-plus plugin SHA
+        id: cache-bandix-sha
+        uses: actions/cache@v5
+        with:
+          path: .plugin-cache/bandix-sha
+          key: bandix-plus-sha
+
+      - name: Check bandix-plus update
+        id: plugin-check
+        run: |
+          git clone --depth=1 https://github.com/timsaya/luci-app-bandix-plus.git /tmp/bandix-plus
+          LATEST_SHA=$(cd /tmp/bandix-plus && git rev-parse HEAD)
+          echo "Latest SHA: $LATEST_SHA"
+
+          CACHE_DIR="$GITHUB_WORKSPACE/.plugin-cache"
+          mkdir -p "$CACHE_DIR"
+          CACHED_SHA_FILE="$CACHE_DIR/bandix-sha"
+          if [ -f "$CACHED_SHA_FILE" ]; then
+            CACHED_SHA=$(cat "$CACHED_SHA_FILE")
+          else
+            CACHED_SHA=""
+          fi
+
+          if [ "$LATEST_SHA" != "$CACHED_SHA" ]; then
+            echo "plugin_updated=true" >> $GITHUB_OUTPUT
+            echo "$LATEST_SHA" > "$CACHED_SHA_FILE"
+            echo "Plugin updated: $CACHED_SHA -> $LATEST_SHA"
+          else
+            echo "plugin_updated=false" >> $GITHUB_OUTPUT
+            echo "Plugin not updated"
+          fi
+
   notify-no-update:
     name: Notify no update
     runs-on: ubuntu-latest
     needs: check
-    # 仅当定时任务且无新版本时通知（feeds检测已移除）
-    if: needs.check.outputs.new_version == 'false' && github.event_name == 'schedule'
+    # 仅当定时任务且无任何更新时通知（系统版本和插件均无更新）
+    if: |
+      needs.check.outputs.new_version == 'false' &&
+      needs.check.outputs.plugin_updated == 'false' &&
+      github.event_name == 'schedule'
     steps:
       - name: Send Bark Notification - No Update
         if: env.BARK_KEY != ''
         run: |
           TITLE="OpenWRT 无更新（定时检测）"
-          BODY="当前最新版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}\n触发方式: 定时任务"
+          BODY="当前最新版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}\n插件 bandix-plus 无更新\n触发方式: 定时任务"
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
@@ -80,8 +117,11 @@ jobs:
     name: Build firmware
     runs-on: ubuntu-latest
     needs: check
-    # 仅当有新版本或手动强制构建时触发
-    if: (needs.check.outputs.new_version == 'true') || (github.event.inputs.force-build == 'true')
+    # 触发条件：系统版本更新 OR 插件更新 OR 手动强制构建
+    if: |
+      (needs.check.outputs.new_version == 'true') ||
+      (needs.check.outputs.plugin_updated == 'true') ||
+      (github.event.inputs.force-build == 'true')
     permissions:
       contents: write
     env:
@@ -210,20 +250,32 @@ jobs:
           fi
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
-      - name: Integrate luci-app-bandix
+      - name: Integrate luci-app-bandix-plus
         working-directory: /workdir/openwrt
         run: |
-          #客隆源码
+          # 清理可能存在的旧目录
+          rm -rf package/luci-app-bandix-plus package/bandix-plus
+
+          # 克隆前端源码
           git clone --depth=1 https://github.com/timsaya/luci-app-bandix-plus.git /tmp/luci-app-bandix-plus
           cp -r /tmp/luci-app-bandix-plus/luci-app-bandix-plus package/
+
+          # 克隆后端源码
           git clone --depth=1 https://github.com/timsaya/openwrt-bandix-plus.git /tmp/openwrt-bandix-plus
           cp -r /tmp/openwrt-bandix-plus/openwrt-bandix-plus package/bandix-plus
+
+          # 清理临时文件
           rm -rf /tmp/luci-app-bandix-plus /tmp/openwrt-bandix-plus
-          #在 .config 中启用这两个包
+
+          # 在 .config 中启用这两个包
           echo "CONFIG_PACKAGE_bandix-plus=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-bandix-plus=y" >> .config
-          #更新配置
-          yes "" | make oldconfig V=s
+
+          # （可选）移除硬件加速冲突选项
+          sed -i '/CONFIG_PACKAGE_luci-app-turboacc/d' .config
+
+          # 更新配置
+          yes "" | make oldconfig
 
       - name: Compile the firmware
         working-directory: /workdir/openwrt
@@ -278,20 +330,29 @@ jobs:
         id: build-info
         if: always()
         run: |
-          # 判断触发方式
-          if [ "${{ github.event_name }}" == "schedule" ]; then
-            TRIGGER="定时任务"
-          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            TRIGGER="手动触发"
+          # 判断触发方式（优先级：手动强制 > 系统更新 > 插件更新）
+          if [ "${{ github.event.inputs.force-build }}" == "true" ] && [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TRIGGER="手动强制构建"
+          elif [ "${{ needs.check.outputs.new_version }}" == "true" ]; then
+            TRIGGER="系统版本更新"
+          elif [ "${{ needs.check.outputs.plugin_updated }}" == "true" ]; then
+            TRIGGER="插件 bandix-plus 更新"
           else
-            TRIGGER="${{ github.event_name }}"
+            TRIGGER="未知触发"
           fi
 
-          # 版本更新状态
+          # 版本更新状态（仅用于通知信息）
           if [ "${{ needs.check.outputs.new_version }}" == "true" ]; then
             VERSION_STATUS="检测到系统版本更新"
           else
-            VERSION_STATUS="手动强制构建（无版本更新）"
+            VERSION_STATUS="无系统版本更新"
+          fi
+
+          # 插件更新状态
+          if [ "${{ needs.check.outputs.plugin_updated }}" == "true" ]; then
+            PLUGIN_STATUS="bandix-plus 有更新"
+          else
+            PLUGIN_STATUS="bandix-plus 无更新"
           fi
 
           CACHE_HIT="${{ steps.cache-toolchain.outputs.cache-hit }}"
@@ -310,6 +371,7 @@ jobs:
 
           echo "trigger=$TRIGGER" >> $GITHUB_OUTPUT
           echo "version_status=$VERSION_STATUS" >> $GITHUB_OUTPUT
+          echo "plugin_status=$PLUGIN_STATUS" >> $GITHUB_OUTPUT
           echo "cache_status=$CACHE_STATUS" >> $GITHUB_OUTPUT
           echo "cache_size=$CACHE_SIZE" >> $GITHUB_OUTPUT
 
@@ -318,10 +380,10 @@ jobs:
         run: |
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
             TITLE="OpenWRT 编译完成"
-            BODY="版本: $STABLE_TAG\n分支: $REPO_BRANCH\n触发方式: ${{ steps.build-info.outputs.trigger }}\n状态: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }} (${{ steps.build-info.outputs.cache_size }})"
+            BODY="版本: $STABLE_TAG\n分支: $REPO_BRANCH\n触发原因: ${{ steps.build-info.outputs.trigger }}\n状态: ${{ steps.build-info.outputs.version_status }}\n插件: ${{ steps.build-info.outputs.plugin_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }} (${{ steps.build-info.outputs.cache_size }})"
           else
             TITLE="OpenWRT 编译失败"
-            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n触发方式: ${{ steps.build-info.outputs.trigger }}\n状态: ${{ steps.build-info.outputs.version_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }}"
+            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n触发原因: ${{ steps.build-info.outputs.trigger }}\n状态: ${{ steps.build-info.outputs.version_status }}\n插件: ${{ steps.build-info.outputs.plugin_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }}"
           fi
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
