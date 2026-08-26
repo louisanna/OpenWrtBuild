@@ -283,6 +283,7 @@ jobs:
           cd feeds/luci
           ./build/i18n-add-language.sh zh_Hans
           cd ../..
+          yes "" | make oldconfig
 
       - name: Compile the firmware
         working-directory: /workdir/openwrt
