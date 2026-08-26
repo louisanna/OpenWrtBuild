@@ -213,7 +213,7 @@ jobs:
       - name: Integrate luci-app-bandix
         working-directory: /workdir/openwrt
         run: |
-        #客隆源码
+          #客隆源码
           git clone --depth=1 https://github.com/timsaya/luci-app-bandix-plus.git /tmp/luci-app-bandix-plus
           cp -r /tmp/luci-app-bandix-plus/luci-app-bandix-plus package/
           git clone --depth=1 https://github.com/timsaya/openwrt-bandix-plus.git /tmp/openwrt-bandix-plus
