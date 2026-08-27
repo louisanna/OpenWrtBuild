@@ -284,22 +284,6 @@ jobs:
           # 更新配置
           yes "" | make oldconfig
 
-      - name: Add Chinese translations
-        working-directory: /workdir/openwrt
-        run: |
-          #./scripts/feeds install luci-app-bandix-plus
-          cd feeds/luci
-          ./build/i18n-add-language.sh zh_Hans
-          cd ../..
-          yes "" | make oldconfig
-          # 检查 base（LuCI 核心）
-          if [ -d "feeds/luci/modules/luci-base/po/zh_Hans" ]; then
-            
-          else
-            echo "错误: base 的 zh_Hans 翻译目录不存在，无法生成基础语言包。"
-            exit 1
-          fi
-
       - name: Compile the firmware
         working-directory: /workdir/openwrt
         id: compile
