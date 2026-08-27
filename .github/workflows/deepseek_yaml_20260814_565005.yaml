@@ -262,6 +262,12 @@ jobs:
           git clone --depth=1 https://github.com/timsaya/luci-app-bandix-plus.git /tmp/luci-app-bandix-plus
           cp -r /tmp/luci-app-bandix-plus/luci-app-bandix-plus package/
 
+          #中文语言包
+          if [ -d "package/luci-app-bandix-plus/po/zh-cn" ]; then
+          echo "Renaming zh-cn to zh_Hans"
+          mv package/luci-app-bandix-plus/po/zh-cn package/luci-app-bandix-plus/po/zh_Hans
+          fi
+
           # 克隆后端源码
           git clone --depth=1 https://github.com/timsaya/openwrt-bandix-plus.git /tmp/openwrt-bandix-plus
           cp -r /tmp/openwrt-bandix-plus/openwrt-bandix-plus package/bandix-plus
@@ -273,6 +279,7 @@ jobs:
           echo "CONFIG_PACKAGE_bandix-plus=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-bandix-plus=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-bandix-plus-zh-cn=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
 
           # 更新配置
           yes "" | make oldconfig
@@ -285,19 +292,21 @@ jobs:
           ./build/i18n-add-language.sh zh_Hans
           cd ../..
           yes "" | make oldconfig
-              # 检查 bandix-plus 的 zh_Hans 目录是否存在
-          if [ ! -d "feeds/luci/applications/luci-app-bandix-plus/po/zh_Hans" ]; then
-            echo "错误: bandix-plus 的 zh_Hans 翻译目录不存在，无法生成中文语言包。编译终止。"
-            exit 1
+          # 检查 base（LuCI 核心）
+          if [ -d "feeds/luci/modules/luci-base/po/zh_Hans" ]; then
+            echo "base 中文翻译目录已存在"
           else
-            echo "bandix-plus 的 zh_Hans 翻译目录已存在"
+            echo "错误: base 的 zh_Hans 翻译目录不存在，无法生成基础语言包。"
+            MISSING=1
           fi
 
-          # 可选：检查是否生成了 .po 文件
-          if [ -f "feeds/luci/applications/luci-app-bandix-plus/po/zh_Hans/bandix-plus.po" ]; then
-            echo "bandix-plus 中文翻译文件已生成"
+          if [ $MISSING -eq 1 ]; then
+            echo "=========================="
+            echo "编译终止：缺少必要的翻译目录。请检查插件源码或 i18n-add-language.sh 执行情况。"
+            exit 1
           else
-            echo "警告: bandix-plus.po 文件不存在，但目录存在，可能后续会生成。继续编译。"
+            echo "=========================="
+            echo "所有必要的翻译目录均已存在，继续编译。"
           fi
 
       - name: Compile the firmware
