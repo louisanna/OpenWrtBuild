@@ -111,7 +111,7 @@ jobs:
             toolchain-${{ needs.check.outputs.repo_branch }}-x86_64
             toolchain-
 
-      - name: Run custom-script-1 & Update feeds
+      - name: Update feeds (always needed for build)
         working-directory: /workdir/openwrt
         run: |
           VERSION=${STABLE_TAG#v}
@@ -121,6 +121,7 @@ jobs:
             echo "Error: feeds.conf download failed or empty"
             exit 1
           fi
+          # 自定义脚本1（已注释）
           #[ -f $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 ] && chmod +x $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1 && $GITHUB_WORKSPACE/$CUSTOM_SCRIPT_1
           ./scripts/feeds update -a && ./scripts/feeds install -a
 
@@ -187,12 +188,30 @@ jobs:
           fi
           echo "Updated $MAKE_FILE with PKG_RELEASE:=$PKG_RELEASE"
 
-      - name: Add Full Cone NAT patches
+      - name: Integrate luci-app-bandix-plus
         working-directory: /workdir/openwrt
         run: |
-          curl -sSL https://raw.githubusercontent.com/mufeng05/openwrt-sonic-fullcone/master/add_sonic_fullcone.sh | bash
-          #sed -i '1iPKG_FIXUP:=autoreconf' package/libs/libnftnl/Makefile
-          yes "" | make oldconfig V=s
+          rm -rf package/luci-app-bandix-plus package/bandix-plus
+
+          git clone --depth=1 https://github.com/timsaya/luci-app-bandix-plus.git /tmp/luci-app-bandix-plus
+          cp -r /tmp/luci-app-bandix-plus/luci-app-bandix-plus package/
+
+          if [ -d "package/luci-app-bandix-plus/po/zh-cn" ]; then
+            echo "Renaming zh-cn to zh_Hans"
+            mv package/luci-app-bandix-plus/po/zh-cn package/luci-app-bandix-plus/po/zh_Hans
+          fi
+
+          git clone --depth=1 https://github.com/timsaya/openwrt-bandix-plus.git /tmp/openwrt-bandix-plus
+          cp -r /tmp/openwrt-bandix-plus/openwrt-bandix-plus package/bandix-plus
+
+          rm -rf /tmp/luci-app-bandix-plus /tmp/openwrt-bandix-plus
+
+          echo "CONFIG_PACKAGE_bandix-plus=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-bandix-plus=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-bandix-plus-zh-cn=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
+
+          yes "" | make oldconfig
 
       - name: Compile the firmware
         working-directory: /workdir/openwrt
