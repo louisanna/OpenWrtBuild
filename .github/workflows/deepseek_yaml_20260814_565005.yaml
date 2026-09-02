@@ -1,4 +1,4 @@
-是否有name: The newest openwrt x86_64 latest
+name: The newest openwrt x86_64 latest
 
 on:
   workflow_dispatch:
