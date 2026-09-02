@@ -135,6 +135,11 @@ jobs:
             echo "Error: $CUSTOM_SCRIPT_2 not found!"
             exit 1
           fi
+          
+          find files/etc/init.d files/etc/hotplug.d files/etc/ppp -type f 2>/dev/null | \
+          while read -r file; do
+            head -c 2 "$file" | grep -q '^#!' && chmod +x "$file"
+          done
 
       - name: Build toolchain (if not cached)
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
