@@ -1,4 +1,4 @@
-name: The newest openwrt x86_64 latest
+是否有name: The newest openwrt x86_64 latest
 
 on:
   workflow_dispatch:
@@ -13,7 +13,6 @@ on:
 env:
   REPO_URL: https://github.com/openwrt/openwrt.git
   CONFIG_FILE: example.config
-  #CUSTOM_SCRIPT_1: script1.sh
   CUSTOM_SCRIPT_2: script2.sh
   STORE_PRODUCTS: false
   STORE_FIRMWARE: true
@@ -29,7 +28,7 @@ jobs:
       stable_tag: ${{ steps.get-version.outputs.stable_tag }}
       repo_branch: ${{ steps.get-version.outputs.repo_branch }}
       new_version: ${{ steps.set-outputs.outputs.new_version }}
-      plugin_updated: ${{ steps.plugin-check.outputs.plugin_updated }}   # 新增输出
+      plugin_updated: ${{ steps.plugin-check.outputs.plugin_updated }}
     steps:
       - name: Get latest stable version
         id: get-version
@@ -61,7 +60,6 @@ jobs:
             echo "new_version=false" >> $GITHUB_OUTPUT
           fi
 
-      # --- 新增：插件更新检测 ---
       - name: Cache bandix-plus plugin SHA
         id: cache-bandix-sha
         uses: actions/cache@v5
@@ -98,7 +96,6 @@ jobs:
     name: Notify no update
     runs-on: ubuntu-latest
     needs: check
-    # 仅当定时任务且无任何更新时通知（系统版本和插件均无更新）
     if: |
       needs.check.outputs.new_version == 'false' &&
       needs.check.outputs.plugin_updated == 'false' &&
@@ -117,7 +114,6 @@ jobs:
     name: Build firmware
     runs-on: ubuntu-latest
     needs: check
-    # 触发条件：系统版本更新 OR 插件更新 OR 手动强制构建
     if: |
       (needs.check.outputs.new_version == 'true') ||
       (needs.check.outputs.plugin_updated == 'true') ||
@@ -161,7 +157,16 @@ jobs:
         run: |
           git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-          cp -r $GITHUB_WORKSPACE/files /workdir/openwrt/ || true
+          cp -r $GITHUB_WORKSPACE/op /workdir/openwrt/ || true
+
+      - name: Change Files
+        working-directory: /workdir/openwrt
+        run: |
+          if [ -f "op/etc/config/network" ]; then
+            sed -i "s/CHANGE_ME_USER/${{ secrets.PPPOE_USER }}/g" op/etc/config/network
+            sed -i "s/CHANGE_ME_PASS/${{ secrets.PPPOE_PASS }}/g" op/etc/config/network
+          fi
+          wget -P op/overlay https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_amd64.tar.gz
 
       - name: Cache toolchain
         id: cache-toolchain
@@ -215,7 +220,6 @@ jobs:
       - name: Fix base-files version
         working-directory: /workdir/openwrt
         run: |
-          #Fix base-files version
           set -e
           VERSION=${STABLE_TAG#v}
           echo "Detected OpenWrt version: $VERSION"
@@ -254,34 +258,26 @@ jobs:
       - name: Integrate luci-app-bandix-plus
         working-directory: /workdir/openwrt
         run: |
-          #Integrate luci-app-bandix-plus
-          # 清理可能存在的旧目录
           rm -rf package/luci-app-bandix-plus package/bandix-plus
 
-          # 克隆前端源码
           git clone --depth=1 https://github.com/timsaya/luci-app-bandix-plus.git /tmp/luci-app-bandix-plus
           cp -r /tmp/luci-app-bandix-plus/luci-app-bandix-plus package/
 
-          #中文语言包
           if [ -d "package/luci-app-bandix-plus/po/zh-cn" ]; then
-          echo "Renaming zh-cn to zh_Hans"
-          mv package/luci-app-bandix-plus/po/zh-cn package/luci-app-bandix-plus/po/zh_Hans
+            echo "Renaming zh-cn to zh_Hans"
+            mv package/luci-app-bandix-plus/po/zh-cn package/luci-app-bandix-plus/po/zh_Hans
           fi
 
-          # 克隆后端源码
           git clone --depth=1 https://github.com/timsaya/openwrt-bandix-plus.git /tmp/openwrt-bandix-plus
           cp -r /tmp/openwrt-bandix-plus/openwrt-bandix-plus package/bandix-plus
 
-          # 清理临时文件
           rm -rf /tmp/luci-app-bandix-plus /tmp/openwrt-bandix-plus
 
-          # 在 .config 中启用这两个包
           echo "CONFIG_PACKAGE_bandix-plus=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-bandix-plus=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-bandix-plus-zh-cn=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
 
-          # 更新配置
           yes "" | make oldconfig
 
       - name: Compile the firmware
@@ -337,7 +333,6 @@ jobs:
         id: build-info
         if: always()
         run: |
-          # 判断触发方式（优先级：手动强制 > 系统更新 > 插件更新）
           if [ "${{ github.event.inputs.force-build }}" == "true" ] && [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             TRIGGER="手动强制构建"
           elif [ "${{ needs.check.outputs.new_version }}" == "true" ]; then
@@ -348,14 +343,12 @@ jobs:
             TRIGGER="未知触发"
           fi
 
-          # 版本更新状态（仅用于通知信息）
           if [ "${{ needs.check.outputs.new_version }}" == "true" ]; then
             VERSION_STATUS="检测到系统版本更新"
           else
             VERSION_STATUS="无系统版本更新"
           fi
 
-          # 插件更新状态
           if [ "${{ needs.check.outputs.plugin_updated }}" == "true" ]; then
             PLUGIN_STATUS="bandix-plus 有更新"
           else
