@@ -1,0 +1,22 @@
+#!/bin/sh /etc/rc.common
+
+USE_PROCD=1
+START=99
+
+start_service() {
+    ADGUARD="/overlay/AdGuardHome/AdGuardHome"
+
+    if [ -f "$ADGUARD" ]; then
+        echo "AdGuardHome found, restarting..."
+        "$ADGUARD" -s stop
+        rm -rf /tmp/AdGuardHome
+        mkdir -p -m 755 /tmp/AdGuardHome
+        "$ADGUARD" -s restart
+    else
+        echo "AdGuardHome not found, skipping."
+    fi
+}
+
+stop_service() {
+    /overlay/AdGuardHome/AdGuardHome -s stop
+}
