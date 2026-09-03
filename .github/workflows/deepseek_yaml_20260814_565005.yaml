@@ -164,7 +164,7 @@ jobs:
             sed -i "s/CHANGE_ME_USER/${{ secrets.PPPOE_USER }}/g" op/etc/config/network
             sed -i "s/CHANGE_ME_PASS/${{ secrets.PPPOE_PASS }}/g" op/etc/config/network
           fi
-          wget -P usr/raspberry/ https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_amd64.tar.gz
+          wget -P op/usr/raspberry/ https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_amd64.tar.gz
 
           find op/etc/init.d op/etc/hotplug.d op/etc/ppp -type f 2>/dev/null | \
           while read -r file; do
