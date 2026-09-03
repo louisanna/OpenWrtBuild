@@ -284,6 +284,7 @@ jobs:
           
           echo "CONFIG_PACKAGE_parted=y" >> .config
           echo "CONFIG_PACKAGE_e2fsprogs=y" >> .config
+          echo "CONFIG_PACKAGE_resize2fs=y" >> .config
           echo "CONFIG_PACKAGE_blkid=y" >> .config
           echo "CONFIG_PACKAGE_losetup=y" >> .config
 
