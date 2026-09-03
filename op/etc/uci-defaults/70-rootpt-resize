@@ -1,0 +1,34 @@
+#!/bin/sh
+# File: /etc/uci-defaults/70-rootpt-resize
+
+if [ ! -e /etc/rootpt-resize ] \
+   && type parted > /dev/null \
+   && lock -n /var/lock/root-resize
+then
+    # 获取根分区对应的块设备
+    ROOT_BLK="$(readlink -f /sys/dev/block/"$(awk -e '$9=="/dev/root"{print $3}' /proc/self/mountinfo)")"
+    ROOT_DISK="/dev/$(basename "${ROOT_BLK%/*}")"
+    ROOT_PART="${ROOT_BLK##*[^0-9]}"
+
+    # 使用 parted 将根分区扩展到 100%
+    parted -f -s "${ROOT_DISK}" resizepart "${ROOT_PART}" 100%
+
+    # 重新挂载根文件系统
+    mount_root
+    done
+
+    # 标记分区已调整
+    touch /etc/rootpt-resize
+
+    # 如果存在 cmdline.txt (常见于树莓派等设备)，更新 PARTUUID
+    if [ -e /boot/cmdline.txt ]
+    then
+        NEW_UUID=`blkid ${ROOT_DISK}p${ROOT_PART} | sed -n 's/.*PARTUUID="\([^"]*\)".*/\1/p'`
+        sed -i "s/PARTUUID=[^ ]*/PARTUUID=${NEW_UUID}/" /boot/cmdline.txt
+    fi
+
+    # 重启系统，使分区调整生效
+    reboot
+fi
+
+exit 1
