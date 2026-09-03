@@ -311,7 +311,7 @@ jobs:
           fi
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
+            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\", \"icon\": \"https://cdn.jsdelivr.net/gh/louisanna/Homepage@master/Wallpaper/OpenWrt_icon.png\"}"
 
   clean:
     name: Clean up old assets
