@@ -281,6 +281,11 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-bandix-plus=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-bandix-plus-zh-cn=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" >> .config
+          
+          echo "CONFIG_PACKAGE_parted=y" >> .config
+          echo "CONFIG_PACKAGE_e2fsprogs=y" >> .config
+          echo "CONFIG_PACKAGE_blkid=y" >> .config
+          echo "CONFIG_PACKAGE_losetup=y" >> .config
 
           yes "" | make oldconfig
 
