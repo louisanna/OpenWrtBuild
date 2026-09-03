@@ -108,7 +108,7 @@ jobs:
           BODY="当前最新版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}\n插件 bandix-plus 无更新\n触发方式: 定时任务"
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
+            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\", \"icon\": \"https://cdn.jsdelivr.net/gh/louisanna/Homepage@master/Wallpaper/OpenWrt_icon.png\"}" || true
 
   build:
     name: Build firmware
@@ -396,7 +396,7 @@ jobs:
           fi
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\"}" || true
+            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\", \"icon\": \"https://cdn.jsdelivr.net/gh/louisanna/Homepage@master/Wallpaper/OpenWrt_icon.png\"}" || true
 
   clean:
     name: Clean up old assets
