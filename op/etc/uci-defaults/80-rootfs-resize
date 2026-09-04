@@ -20,6 +20,8 @@ then
     mount_root
 
     touch /etc/rootfs-resize
+    apk del parted resize2fs e2fsprogs blkid losetup
+    rm -f /etc/rootpt-resize /etc/rootfs-resize
     reboot
     exit 0
 fi
