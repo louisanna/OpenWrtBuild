@@ -1,0 +1,14 @@
+
+config bandix_plus 'general'
+	option enable_traffic '1'
+	option log_level 'info'
+	option tc_backend 'auto'
+	option traffic_enable_storage '0'
+	option port '8787'
+	option data_dir '/tmp/bandix-plus'
+	option host '127.0.0.1'
+	option history_window_minutes '10'
+	list iface 'eth1'
+	list iface 'eth0'
+	list iface 'pppoe-wan'
+
