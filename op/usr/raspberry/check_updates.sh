@@ -4,7 +4,7 @@
 BARK_URL="https://bark.free.svipss.top/wkXQBsJ7mchriPBH8c7c6Z/"
 
 # 更新软件源
-cat /rom/lib/apk/db/installed > /lib/apk/db/installed
+#cat /rom/lib/apk/db/installed > /lib/apk/db/installed
 apk update > /dev/null 2>&1
 
 # 执行模拟升级并捕获输出
