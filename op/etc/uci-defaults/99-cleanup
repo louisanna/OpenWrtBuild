@@ -1,0 +1,14 @@
+#!/bin/sh
+# File: /etc/uci-defaults/99-cleanup
+# 在扩容后的首次启动时清理临时工具
+
+# 确认扩容已完成
+if [ -e /etc/rootfs-resize ]; then
+    # 卸载不需要的包
+    apk del parted resize2fs e2fsprogs blkid losetup 2>/dev/null
+    # 删除标记文件和自身
+    rm -f /etc/rootpt-resize /etc/rootfs-resize
+    #rm -f /etc/uci-defaults/99-cleanup
+    exit 0
+fi
+exit 1
