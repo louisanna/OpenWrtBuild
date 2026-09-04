@@ -8,6 +8,7 @@ if [ -e /etc/rootfs-resize ]; then
     apk del parted resize2fs e2fsprogs blkid losetup libparted 2>/dev/null
     # 删除标记文件和自身
     rm -f /etc/rootpt-resize /etc/rootfs-resize
+    rm -f /etc/uci-defaults/80-rootfs-resize
     #rm -f /etc/uci-defaults/99-cleanup
     exit 0
 fi
