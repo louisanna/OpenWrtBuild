@@ -79,7 +79,7 @@ dns:
     custom_ip: ""
     enabled: false
     use_custom: false
-  max_goroutines: 600
+  max_goroutines: 0
   handle_ddr: true
   ipset: []
   ipset_file: ""
