@@ -1,10 +1,10 @@
 #!/bin/sh
 
 # Bark 推送地址（请替换为实际地址）
-BARK_URL="https://bark.free.svipss.top/wkXQBsJ7mchriPBH8c7c6Z/"
+BARK_URL="https://bark.free.svipss.top/brjTD2MmUaTTVxRYh8TTZC/"
 
 # 更新软件源
-#cat /rom/lib/apk/db/installed > /lib/apk/db/installed
+cat /rom/lib/apk/db/installed > /lib/apk/db/installed
 apk update > /dev/null 2>&1
 
 # 执行模拟升级并捕获输出
