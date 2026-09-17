@@ -60,36 +60,43 @@ jobs:
             echo "new_version=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Get bandix-plus latest SHA (LuCI + backend)
+        id: bandix-sha
+        run: |
+          set -e
+          LUCI_SHA=$(git ls-remote https://github.com/timsaya/luci-app-bandix-plus.git HEAD | awk '{print $1}')
+          BACKEND_SHA=$(git ls-remote https://github.com/timsaya/openwrt-bandix-plus.git HEAD | awk '{print $1}')
+
+          [ -z "$LUCI_SHA" ] && echo "Error: Failed to get luci-app-bandix-plus SHA" && exit 1
+          [ -z "$BACKEND_SHA" ] && echo "Error: Failed to get openwrt-bandix-plus SHA" && exit 1
+
+          COMBINED_SHA="${LUCI_SHA}-${BACKEND_SHA}"
+          echo "LuCI SHA: $LUCI_SHA"
+          echo "Backend SHA: $BACKEND_SHA"
+          echo "Combined SHA: $COMBINED_SHA"
+
+          echo "luci_sha=$LUCI_SHA" >> $GITHUB_OUTPUT
+          echo "backend_sha=$BACKEND_SHA" >> $GITHUB_OUTPUT
+          echo "combined_sha=$COMBINED_SHA" >> $GITHUB_OUTPUT
+
       - name: Cache bandix-plus plugin SHA
         id: cache-bandix-sha
         uses: actions/cache@v5
         with:
           path: .plugin-cache/bandix-sha
-          key: bandix-plus-sha
+          key: bandix-plus-sha-${{ steps.bandix-sha.outputs.combined_sha }}
 
       - name: Check bandix-plus update
         id: plugin-check
         run: |
-          git clone --depth=1 https://github.com/timsaya/luci-app-bandix-plus.git /tmp/bandix-plus
-          LATEST_SHA=$(cd /tmp/bandix-plus && git rev-parse HEAD)
-          echo "Latest SHA: $LATEST_SHA"
-
-          CACHE_DIR="$GITHUB_WORKSPACE/.plugin-cache"
-          mkdir -p "$CACHE_DIR"
-          CACHED_SHA_FILE="$CACHE_DIR/bandix-sha"
-          if [ -f "$CACHED_SHA_FILE" ]; then
-            CACHED_SHA=$(cat "$CACHED_SHA_FILE")
-          else
-            CACHED_SHA=""
-          fi
-
-          if [ "$LATEST_SHA" != "$CACHED_SHA" ]; then
-            echo "plugin_updated=true" >> $GITHUB_OUTPUT
-            echo "$LATEST_SHA" > "$CACHED_SHA_FILE"
-            echo "Plugin updated: $CACHED_SHA -> $LATEST_SHA"
-          else
+          if [ "${{ steps.cache-bandix-sha.outputs.cache-hit }}" == "true" ]; then
             echo "plugin_updated=false" >> $GITHUB_OUTPUT
             echo "Plugin not updated"
+          else
+            echo "plugin_updated=true" >> $GITHUB_OUTPUT
+            mkdir -p "$GITHUB_WORKSPACE/.plugin-cache"
+            echo "${{ steps.bandix-sha.outputs.combined_sha }}" > "$GITHUB_WORKSPACE/.plugin-cache/bandix-sha"
+            echo "Plugin updated: ${{ steps.bandix-sha.outputs.combined_sha }}"
           fi
 
   notify-no-update:
@@ -105,7 +112,7 @@ jobs:
         if: env.BARK_KEY != ''
         run: |
           TITLE="OpenWRT 无更新（定时检测）"
-          BODY="当前最新版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}\n插件 bandix-plus 无更新\n触发方式: 定时任务"
+          BODY="当前最新版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}\n插件 bandix-plus（LuCI + 后端）无更新\n触发方式: 定时任务"
           curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
             -H "Content-Type: application/json" \
             -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\", \"icon\": \"https://cdn.jsdelivr.net/gh/louisanna/Homepage@master/Wallpaper/OpenWrt_icon.png\"}" || true
