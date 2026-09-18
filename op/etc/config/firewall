@@ -142,7 +142,7 @@ config rule
 	option target 'ACCEPT'
 	option enabled '1'
 	option family 'ipv6'
-	list dest_ip '::5cd/::ffff:ffff:ffff:ffff'
+	list dest_ip '::5df/::ffff:ffff:ffff:ffff'
 
 config include
 	option type 'nftables'
