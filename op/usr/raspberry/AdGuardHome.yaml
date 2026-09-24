@@ -30,7 +30,7 @@ dns:
   ratelimit_whitelist: []
   refuse_any: true
   upstream_dns:
-    - '[/miwifi.com/mi.com/xiaomi.net/xiaomi.com/baidu.com/ntp.org/ixigua.com/bilivideo.com/bilibili.com/bilivideo.cn/oray.com/gitv.tv/netease.com/zhuanzfx.com/lenovomm.com/lenovomm.cn/ksyuncdn.com/kuaishou.com/163.com/pinduoduo.com/pddpic.com/pddugc.com/biliapi.com/]https://doh.360.cn/dns-query'
+    - '[/miwifi.com/mi.com/xiaomi.net/xiaomi.com/baidu.com/ntp.org/ixigua.com/bilivideo.com/bilibili.com/bilivideo.cn/oray.com/gitv.tv/netease.com/zhuanzfx.com/lenovomm.com/lenovomm.cn/ksyuncdn.com/kuaishou.com/163.com/pinduoduo.com/pddpic.com/pddugc.com/biliapi.com/biliapi.net/]https://doh.360.cn/dns-query'
     - '[/douyinvod.com/bdurl.net/douyincdn.com/douyincdn.com.queniurc.com/snssdk.com/xycdn.com/kuiniuca.com/douyinpic.com/amemv.com/ecombdapi.com/douyinstatic.com/yingt.fun/qiezibenpao.com/ks-live.com/ctydoh.cn/siomxity.net/free-lbv26.idouyinvod.com/vegslb.com/free-lbv13.idouyinvod.com/free-lbv3.idouyinvod.com/byteimg.com/zijieapi.com/xinqiucc.com/bytecdn.com/bytedance.com/siomxity.com/smtcdns.com/ahdohpiechei.com/365dmp.com/miaozhen.com/free-lbv6.idouyinvod.com/cjjd14.com/bytegecko.com/huoshanlive.com/douyinliving.com/bytefcdnrd.com/sealaly.net/qishui.com/baike.com/searchpstatp.com/tt.x.bsgslb.cn/ecombdimg.com/ecombdpage.com/bytednsdoc.com/ksyuncdn.com/]180.184.1.1
       https://doh.360.cn/dns-query'
     - '[/apple.com/io.mi.com/icloud.com/apple-dns.cn/icloud.com.cn/]quic://dns.alidns.com:853'
@@ -206,9 +206,8 @@ filtering:
   parental_block_host: family-block.dns.adguard.com
   safebrowsing_block_host: standard-block.dns.adguard.com
   rewrites: []
-  safe_fs_patterns:
-    - 
-  max_http_size: 1024MB
+  safe_fs_patterns: []
+  max_http_size: 1GB
   safebrowsing_cache_size: 1048576
   safesearch_cache_size: 1048576
   parental_cache_size: 1048576
@@ -224,7 +223,7 @@ clients:
   runtime_sources:
     whois: true
     arp: true
-    rdns: true
+    rdns: false
     dhcp: true
     hosts: true
   persistent: []
