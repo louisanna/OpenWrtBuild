@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+# AdGuardHome - procd-managed DNS resolver / ad blocker
+#
+# Data (query log, statistics, filter cache) is written to RAM:
+#   /tmp/AdGuardHome
+# The configuration file is read and written at:
+#   /usr/raspberry/AdGuardHome.yaml
+# so changes made in the web UI survive reboots. Keep that file in
+# /etc/sysupgrade.conf if the settings should also survive sysupgrade.
+
+USE_PROCD=1
+START=50
+STOP=01
+
+start_service() {
+	[ -x /usr/raspberry/AdGuardHome/AdGuardHome ] || {
+		logger -t AdGuardHome "binary not found, skipping start"
+		return 0
+	}
+
+	mkdir -p /tmp/AdGuardHome
+
+	procd_open_instance
+	procd_set_param command /usr/raspberry/AdGuardHome/AdGuardHome -c /usr/raspberry/AdGuardHome.yaml -w /tmp/AdGuardHome -s run
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_set_param pidfile /var/run/AdGuardHome.pid
+	procd_close_instance
+}
