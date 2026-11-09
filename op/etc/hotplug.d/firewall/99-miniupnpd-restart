@@ -1,4 +1,4 @@
 #!/bin/sh
-[ "${ACTION}" = "reload" ] || [ "${ACTION}" = "restart" ] && {
-    /etc/init.d/miniupnpd restart
-}
+case "$ACTION" in
+	reload|restart) /etc/init.d/miniupnpd restart ;;
+esac

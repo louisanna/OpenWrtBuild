@@ -1,13 +1,18 @@
 #!/bin/sh
-# 仅在 WAN 接口上线时触发
+# Update miniupnpd's external_ip from the address assigned to the WAN
+# interface every time WAN comes up. Falls back to a fixed address so
+# UPnP clients always see a valid value.
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "wan" ] || exit 0
 
-# 获取公网 IP（你的原逻辑）
-PUBLIC_IP=$(curl -4 -s myip.ipip.net | sed -n 's/当前 IP：\([0-9\.]*\).*/\1/p')
+FALLBACK_IP="112.20.126.123"
 
-# 只有拿到有效 IP 才更新，避免清空配置
-if [ -n "$PUBLIC_IP" ]; then
-    uci set upnpd.config.external_ip="$PUBLIC_IP"
-    uci commit upnpd
-    /etc/init.d/miniupnpd restart
-fi
+ip=$(ifstatus wan 2>/dev/null | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+[ -n "$ip" ] || ip="$FALLBACK_IP"
+
+cur=$(uci -q get upnpd.config.external_ip 2>/dev/null)
+[ "$cur" = "$ip" ] && exit 0
+
+uci set upnpd.config.external_ip="$ip" 2>/dev/null || exit 0
+uci commit upnpd
+logger -t upnp-external-ip "external_ip set to $ip"
+/etc/init.d/miniupnpd restart

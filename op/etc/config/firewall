@@ -143,8 +143,3 @@ config rule
 	option enabled '1'
 	option family 'ipv6'
 	list dest_ip '::5df/::ffff:ffff:ffff:ffff'
-
-config include
-	option type 'nftables'
-	option path '/etc/hotplug.d/firewall/99-miniupnpd-restart'
-	option position 'chain-pre'

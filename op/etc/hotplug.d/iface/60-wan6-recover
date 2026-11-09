@@ -1,0 +1,14 @@
+#!/bin/sh
+# Bring wan6 back up shortly after it goes down.
+[ "$ACTION" = "ifdown" ] && [ "$INTERFACE" = "wan6" ] || exit 0
+
+(
+	sleep 5
+	# Only try while IPv4 WAN is up, otherwise wan6 cannot come back yet.
+	ubus call network.interface.wan status 2>/dev/null | grep -q '"up": true' || exit 0
+	ubus call network.interface.wan6 status 2>/dev/null | grep -q '"up": true' && exit 0
+	logger -t wan6-recover "wan6 is down, bringing it back"
+	ubus call network.interface.wan6 down 2>/dev/null
+	sleep 1
+	ubus call network.interface.wan6 up 2>/dev/null
+) &
