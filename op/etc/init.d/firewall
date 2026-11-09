@@ -11,7 +11,7 @@ service_triggers() {
 
 restart() {
 	fw4 restart
-	/sbin/hotplug-call firewall
+	ACTION=restart /sbin/hotplug-call firewall
 }
 
 start_service() {
@@ -26,7 +26,7 @@ reload_service() {
 	fw4 reload
 	# fw4 never calls hotplug itself; run it so /etc/hotplug.d/firewall/*
 	# hooks (e.g. miniupnpd restart) run after every firewall reload.
-	/sbin/hotplug-call firewall
+	ACTION=reload /sbin/hotplug-call firewall
 }
 
 boot() {
