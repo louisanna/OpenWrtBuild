@@ -161,6 +161,9 @@ jobs:
 
       - name: Clone source code
         working-directory: /workdir
+        env:
+          ROOT_PASSWORD: ${{ secrets.ROOT_PASSWORD }}
+          ROOT_PASSWORD_HASH: ${{ secrets.ROOT_PASSWORD_HASH }}
         run: |
           git clone --depth 1 --branch $STABLE_TAG --single-branch $REPO_URL openwrt
           ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
@@ -171,6 +174,30 @@ jobs:
             sed -i "s/CHANGE_ME_USER/${{ secrets.PPPOE_USER }}/g" op/etc/config/network
             sed -i "s/CHANGE_ME_PASS/${{ secrets.PPPOE_PASS }}/g" op/etc/config/network
           fi
+
+          # Root password: prefer a pre-hashed secret, fall back to hashing a
+          # plaintext one. Fail loudly instead of shipping a default password.
+          if [ -f op/etc/uci-defaults/90_password_root ]; then
+            if [ -n "$ROOT_PASSWORD_HASH" ]; then
+              HASH="$ROOT_PASSWORD_HASH"
+            elif [ -n "$ROOT_PASSWORD" ]; then
+              HASH=$(openssl passwd -6 "$ROOT_PASSWORD")
+            else
+              echo "Error: set ROOT_PASSWORD_HASH or ROOT_PASSWORD secret"
+              exit 1
+            fi
+            HASH="$HASH" python3 -c "import os;p='op/etc/uci-defaults/90_password_root';s=open(p).read();open(p,'w').write(s.replace('__ROOT_PASSWORD_HASH__', os.environ['HASH']))"
+            if grep -q '__ROOT_PASSWORD_HASH__' op/etc/uci-defaults/90_password_root; then
+              echo "Error: root password hash placeholder was not replaced"
+              exit 1
+            fi
+          fi
+
+          # Bark push key: when missing, check_updates.sh skips notifications.
+          if [ -n "$BARK_KEY" ] && [ -f op/usr/raspberry/check_updates.sh ]; then
+            BARK_KEY="$BARK_KEY" python3 -c "import os;p='op/usr/raspberry/check_updates.sh';s=open(p).read();open(p,'w').write(s.replace('__BARK_KEY__', os.environ['BARK_KEY']))"
+          fi
+
           wget -P op/usr/raspberry/ https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_amd64.tar.gz
 
           find op/etc/init.d op/etc/hotplug.d op/etc/ppp -type f 2>/dev/null | \

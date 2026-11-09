@@ -1,7 +1,12 @@
 #!/bin/sh
 
-# Bark 推送地址（请替换为实际地址）
-BARK_URL="https://bark.free.svipss.top/brjTD2MmUaTTVxRYh8TTZC/"
+# Bark 推送地址（构建时由 BARK_KEY secret 替换 __BARK_KEY__）
+BARK_URL="https://bark.free.svipss.top/__BARK_KEY__/"
+
+# 没有注入 key 就不发通知
+case "$BARK_URL" in
+*__BARK_KEY__*) exit 0 ;;
+esac
 
 # 更新软件源
 #cat /rom/lib/apk/db/installed > /lib/apk/db/installed
