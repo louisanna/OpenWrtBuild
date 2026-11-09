@@ -1,9 +1,12 @@
 #!/bin/sh /etc/rc.common
 # irq_guard - run the NIC IRQ affinity daemon under procd supervision
 #
-# The daemon itself lives in /usr/raspberry/check_updates.sh:
+# The daemon itself lives in /usr/raspberry/irq_guard.sh:
 #   /etc/init.d/irq_guard start|stop|restart|enable|disable
 #   /etc/init.d/irq_guard mapping      # show current queue->CPU mapping
+#
+# NOTE: /usr/raspberry/check_updates.sh is a one-shot update checker and is
+# intentionally NOT run from here; it is scheduled from /etc/crontabs/root.
 
 USE_PROCD=1
 START=99
@@ -24,7 +27,7 @@ start_service() {
 	fi
 
 	procd_open_instance
-	procd_set_param command /bin/sh /usr/raspberry/check_updates.sh
+	procd_set_param command /bin/sh /usr/raspberry/irq_guard.sh
 	procd_set_param respawn 3600 5 5
 	procd_set_param stdout 1
 	procd_set_param stderr 1
@@ -35,5 +38,5 @@ EXTRA_COMMANDS="mapping"
 EXTRA_HELP="	mapping	Show current NIC queue/IRQ/CPU mapping"
 
 mapping() {
-	/bin/sh /usr/raspberry/check_updates.sh --status
+	/bin/sh /usr/raspberry/irq_guard.sh --status
 }

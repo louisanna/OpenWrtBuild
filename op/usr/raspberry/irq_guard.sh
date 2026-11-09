@@ -2,9 +2,9 @@
 # irq_guard.sh - NIC queue/IRQ affinity and ring tuning for OpenWrt
 #
 # Design (4-core x86 router, igc NICs with 4 combined queues each):
-#   * one hardware queue per CPU when queue count >= core count
-#   * every NIC starts its round-robin at CPU1; CPU0 is only used when
-#     all cores are needed (queue count >= cores), otherwise it is skipped
+#   * queue 0 is the hot queue on both igc NICs (the same flow hashes to
+#     the same queue index), so WAN and LAN start at different CPUs to keep
+#     those two hot queues on separate cores
 #   * RPS/RFS are disabled: with one queue per core they only add
 #     cross-CPU IPIs and RFS tables get over-committed
 #   * ring buffers raised to the hardware maximum (capped at 4096)
@@ -12,10 +12,21 @@
 #     resets it silently
 #
 # Usage: irq_guard.sh [--status]
+#
+# procd on this image injects LD_PRELOAD=/lib/libsetlbf.so into services. With
+# that preload active, a write to .../xps_cpus reports success but the queue
+# ends up with mask 0 (XPS disabled), so the TX<->CPU mapping never sticks.
+# Re-exec once without the preload so every sysfs write below actually lands.
+
+if [ -n "$LD_PRELOAD" ]; then
+	exec env -u LD_PRELOAD /bin/sh "$0" "$@"
+fi
 
 TAG="irq_guard"
 INTERVAL=30
 RING_TARGET=4096
+WAN_CPU_START=2
+LAN_CPU_START=1
 
 log() { logger -t "$TAG" "$*" 2>/dev/null; }
 uci_get() { uci -q get "$1" 2>/dev/null | head -n1; }
@@ -201,8 +212,8 @@ main() {
 	disable_rps $seen
 
 	while :; do
-		for p in $(list_ports "$WAN_IF"); do bind_iface "$p" 1; done
-		for p in $(list_ports "$LAN_IF"); do bind_iface "$p" 1; done
+		for p in $(list_ports "$WAN_IF"); do bind_iface "$p" "$WAN_CPU_START"; done
+		for p in $(list_ports "$LAN_IF"); do bind_iface "$p" "$LAN_CPU_START"; done
 		sleep "$INTERVAL"
 	done
 }
