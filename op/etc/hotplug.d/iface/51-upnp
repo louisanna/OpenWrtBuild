@@ -1,7 +1,7 @@
 #!/bin/sh
-# Set upnpd.external_ip to the current public address on every WAN ifup.
+# Set upnpd.external_ip to the current public address after WAN comes up.
 # miniupnpd rejects private / CGNAT addresses, so only a public address is
-# usable here; keep a fixed fallback for when all probes fail.
+# usable; retry in the background because DNS may not be ready at ifup.
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "wan" ] || exit 0
 
 FALLBACK_IP="112.20.126.123"
@@ -16,14 +16,25 @@ is_public() {
 	return 0
 }
 
-pub=$(curl -4 -fsS --connect-timeout 3 --max-time 6 https://ip.3322.net 2>/dev/null)
-is_public "$pub" || pub=$(curl -4 -s --connect-timeout 3 --max-time 6 https://myip.ipip.net 2>/dev/null | sed -n 's/.*IP[：:][[:space:]]*\([0-9.]*\).*/\1/p')
-is_public "$pub" || pub="$FALLBACK_IP"
+(
+	i=0
+	pub=""
+	while [ "$i" -lt 12 ]; do
+		pub=$(curl -4 -fsS --connect-timeout 3 --max-time 6 https://ip.3322.net 2>/dev/null)
+		is_public "$pub" || pub=$(curl -4 -s --connect-timeout 3 --max-time 6 https://myip.ipip.net 2>/dev/null | sed -n 's/.*IP[：:][[:space:]]*\([0-9.]*\).*/\1/p')
+		is_public "$pub" && break
+		pub=""
+		i=$((i + 1))
+		sleep 5
+	done
+	is_public "$pub" || pub="$FALLBACK_IP"
 
-cur=$(uci -q get upnpd.config.external_ip 2>/dev/null)
-[ "$cur" = "$pub" ] && exit 0
+	cur=$(uci -q get upnpd.config.external_ip 2>/dev/null)
+	[ "$cur" = "$pub" ] && exit 0
 
-uci set upnpd.config.external_ip="$pub" 2>/dev/null || exit 0
-uci commit upnpd
-logger -t upnp-external-ip "external_ip set to $pub"
-/etc/init.d/miniupnpd restart
+	uci set upnpd.config.external_ip="$pub" 2>/dev/null || exit 0
+	uci commit upnpd
+	logger -t upnp-external-ip "external_ip set to $pub"
+	/etc/init.d/miniupnpd restart
+) &
+exit 0
