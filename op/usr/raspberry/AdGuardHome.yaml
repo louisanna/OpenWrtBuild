@@ -168,6 +168,7 @@ user_rules:
   - '||fp-proxy.fengkongcloud.com^'
   - '||risk.dun.mi.com^'
   - '@@||ark.qq.com^'
+  - '||lb._dns-sd._udp.lan^'
 dhcp:
   enabled: false
   interface_name: ""
