@@ -18,7 +18,7 @@ start_service() {
 		return 0
 	}
 
-	mkdir -p /tmp/AdGuardHome
+	mkdir -p -m 700 /tmp/AdGuardHome
 
 	procd_open_instance
 	procd_set_param command /usr/raspberry/AdGuardHome/AdGuardHome -c /usr/raspberry/AdGuardHome.yaml -w /tmp/AdGuardHome -s run
