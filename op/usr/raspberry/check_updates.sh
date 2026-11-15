@@ -1,11 +1,11 @@
 #!/bin/sh
 
-# Bark 推送地址（构建时由 BARK_KEY secret 替换 __BARK_KEY__）
+# Bark 推送地址（构建时由 BARK_KEY secret 注入）
 BARK_URL="https://bark.free.svipss.top/__BARK_KEY__/"
 
 # 没有注入 key 就不发通知
 case "$BARK_URL" in
-*__BARK_KEY__*) exit 0 ;;
+*__BARK*) logger -t check_updates "BARK_KEY not injected, skip"; exit 0 ;;
 esac
 
 # 更新软件源
@@ -16,7 +16,7 @@ apk update > /dev/null 2>&1
 UPGRADE_OUTPUT=$(apk upgrade --available --simulate 2>/dev/null)
 
 # 无更新则直接退出
-[ -z "$UPGRADE_OUTPUT" ] && exit 0
+[ -z "$UPGRADE_OUTPUT" ] && { logger -t check_updates "no package updates"; exit 0; }
 
 # 临时文件
 PKG_TMP="/tmp/pkglist.tmp"
@@ -91,4 +91,5 @@ fi
 
 # 发送 Bark 通知
 JSON_DATA="{\"title\":\"OpenWrt 系统更新\",\"body\":\"$BODY\",\"group\":\"OpenWrt\"}"
-curl -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$BARK_URL" > /dev/null 2>&1
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST -H "Content-Type: application/json" -d "$JSON_DATA" "$BARK_URL")
+logger -t check_updates "notification sent: total=${total} http=${HTTP_CODE}"
