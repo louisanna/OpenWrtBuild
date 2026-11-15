@@ -169,6 +169,7 @@ user_rules:
   - '||risk.dun.mi.com^'
   - '@@||ark.qq.com^'
   - '||lb._dns-sd._udp.lan^'
+  - /^lb\._dns-sd\._udp\..*\.in-addr\.arpa$/
 dhcp:
   enabled: false
   interface_name: ""
