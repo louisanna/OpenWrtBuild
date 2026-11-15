@@ -112,10 +112,20 @@ jobs:
         if: env.BARK_KEY != ''
         run: |
           TITLE="OpenWRT 无更新（定时检测）"
-          BODY="当前最新版本: ${{ needs.check.outputs.stable_tag }}\n分支: ${{ needs.check.outputs.repo_branch }}\n插件 bandix-plus（LuCI + 后端）无更新\n触发方式: 定时任务"
-          curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\", \"icon\": \"https://cdn.jsdelivr.net/gh/louisanna/Homepage@master/Wallpaper/OpenWrt_icon.png\"}" || true
+          BODY=$(printf '%s\n' \
+            "当前最新版本: ${{ needs.check.outputs.stable_tag }}" \
+            "分支: ${{ needs.check.outputs.repo_branch }}" \
+            "插件 bandix-plus（LuCI + 后端）无更新" \
+            "触发方式: 定时任务")
+          jq -n --arg title "$TITLE" --arg body "$BODY" \
+            --arg group "OpenWRT 编译" \
+            --arg icon "https://cdn.jsdelivr.net/gh/louisanna/Homepage@master/Wallpaper/OpenWrt_icon.png" \
+            '{title: $title, body: $body, group: $group, icon: $icon}' > /tmp/bark.json
+          HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST \
+            -H "Content-Type: application/json" --data-binary @/tmp/bark.json \
+            "https://bark.free.svipss.top/$BARK_KEY")
+          echo "bark push (no-update): http=$HTTP"
+          rm -f /tmp/bark.json
 
   build:
     name: Build firmware
@@ -450,14 +460,31 @@ jobs:
         run: |
           if [ "${{ steps.compile.outputs.status }}" == "success" ]; then
             TITLE="OpenWRT 编译完成"
-            BODY="版本: $STABLE_TAG\n分支: $REPO_BRANCH\n触发原因: ${{ steps.build-info.outputs.trigger }}\n状态: ${{ steps.build-info.outputs.version_status }}\n插件: ${{ steps.build-info.outputs.plugin_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }} (${{ steps.build-info.outputs.cache_size }})"
+            BODY=$(printf '%s\n' \
+              "版本: $STABLE_TAG" \
+              "分支: $REPO_BRANCH" \
+              "触发原因: ${{ steps.build-info.outputs.trigger }}" \
+              "状态: ${{ steps.build-info.outputs.version_status }}" \
+              "插件: ${{ steps.build-info.outputs.plugin_status }}" \
+              "Toolchain缓存: ${{ steps.build-info.outputs.cache_status }} (${{ steps.build-info.outputs.cache_size }})")
           else
             TITLE="OpenWRT 编译失败"
-            BODY="编译过程出现问题，请检查 GitHub Actions 日志。\n触发原因: ${{ steps.build-info.outputs.trigger }}\n状态: ${{ steps.build-info.outputs.version_status }}\n插件: ${{ steps.build-info.outputs.plugin_status }}\nToolchain缓存: ${{ steps.build-info.outputs.cache_status }}"
+            BODY=$(printf '%s\n' \
+              "编译过程出现问题，请检查 GitHub Actions 日志。" \
+              "触发原因: ${{ steps.build-info.outputs.trigger }}" \
+              "状态: ${{ steps.build-info.outputs.version_status }}" \
+              "插件: ${{ steps.build-info.outputs.plugin_status }}" \
+              "Toolchain缓存: ${{ steps.build-info.outputs.cache_status }}")
           fi
-          curl -s -X POST "https://bark.free.svipss.top/$BARK_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"title\": \"$TITLE\", \"body\": \"$BODY\", \"group\": \"OpenWRT 编译\", \"icon\": \"https://cdn.jsdelivr.net/gh/louisanna/Homepage@master/Wallpaper/OpenWrt_icon.png\"}" || true
+          jq -n --arg title "$TITLE" --arg body "$BODY" \
+            --arg group "OpenWRT 编译" \
+            --arg icon "https://cdn.jsdelivr.net/gh/louisanna/Homepage@master/Wallpaper/OpenWrt_icon.png" \
+            '{title: $title, body: $body, group: $group, icon: $icon}' > /tmp/bark.json
+          HTTP=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST \
+            -H "Content-Type: application/json" --data-binary @/tmp/bark.json \
+            "https://bark.free.svipss.top/$BARK_KEY")
+          echo "bark push (build): http=$HTTP status=${{ steps.compile.outputs.status }}"
+          rm -f /tmp/bark.json
 
   clean:
     name: Clean up old assets
