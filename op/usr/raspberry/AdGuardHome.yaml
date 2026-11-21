@@ -36,6 +36,7 @@ dns:
     - '[/apple.com/io.mi.com/icloud.com/apple-dns.cn/icloud.com.cn/]quic://dns.alidns.com:853'
     - '[/wechat.com/qq.com/qq.com.cn/tencent-cloud.cn/tencent.com/tencent-cloud.net/txlivecdn.com/qpic.cn/weixinbridge.com/wechatpay.cn/tencentcos.cn/]https://doh.pub/dns-query'
     - https://doh.pub/dns-query
+    - https://doh.360.cn/dns-query
     - https://dns.alidns.com/dns-query
     - '#https://doh-pure.onedns.net/dns-query'
   upstream_dns_file: ""
